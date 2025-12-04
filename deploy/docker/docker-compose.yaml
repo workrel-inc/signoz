@@ -187,6 +187,7 @@ services:
     restart: on-failure
 networks:
   signoz-net:
+    external: true
     name: signoz-net
 volumes:
   clickhouse:

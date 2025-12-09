@@ -132,6 +132,7 @@ services:
       - TELEMETRY_ENABLED=true
       - DEPLOYMENT_TYPE=docker-standalone-amd
       - DOT_METRICS_ENABLED=true
+      - SIGNOZ_JWT_SECRET=${SIGNOZ_JWT_SECRET:-}
     healthcheck:
       test:
         - CMD

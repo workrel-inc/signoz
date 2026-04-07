@@ -1,11 +1,15 @@
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Route, Router, Switch } from 'react-router-dom';
+import { CompatRouter } from 'react-router-dom-v5-compat';
 import * as Sentry from '@sentry/react';
 import { ConfigProvider } from 'antd';
 import getLocalStorageApi from 'api/browser/localstorage/get';
 import setLocalStorageApi from 'api/browser/localstorage/set';
 import logEvent from 'api/common/logEvent';
 import AppLoading from 'components/AppLoading/AppLoading';
-import KBarCommandPalette from 'components/KBarCommandPalette/KBarCommandPalette';
+import { CmdKPalette } from 'components/cmdKPalette/cmdKPalette';
 import NotFound from 'components/NotFound';
+import { ShiftHoldOverlayController } from 'components/ShiftOverlay/ShiftHoldOverlayController';
 import Spinner from 'components/Spinner';
 import { FeatureKeys } from 'constants/features';
 import { LOCALSTORAGE } from 'constants/localStorage';
@@ -14,7 +18,7 @@ import AppLayout from 'container/AppLayout';
 import Hex from 'crypto-js/enc-hex';
 import HmacSHA256 from 'crypto-js/hmac-sha256';
 import { KeyboardHotkeysProvider } from 'hooks/hotkeys/useKeyboardHotkeys';
-import { useThemeConfig } from 'hooks/useDarkMode';
+import { useIsDarkMode, useThemeConfig } from 'hooks/useDarkMode';
 import { useGetTenantLicense } from 'hooks/useGetTenantLicense';
 import { NotificationProvider } from 'hooks/useNotifications';
 import { ResourceProvider } from 'hooks/useResourceAttribute';
@@ -24,14 +28,10 @@ import ErrorBoundaryFallback from 'pages/ErrorBoundaryFallback/ErrorBoundaryFall
 import posthog from 'posthog-js';
 import { useAppContext } from 'providers/App/App';
 import { IUser } from 'providers/App/types';
-import { DashboardProvider } from 'providers/Dashboard/Dashboard';
+import { CmdKProvider } from 'providers/cmdKProvider';
 import { ErrorModalProvider } from 'providers/ErrorModalProvider';
-import { KBarCommandPaletteProvider } from 'providers/KBarCommandPaletteProvider';
 import { PreferenceContextProvider } from 'providers/preferences/context/PreferenceContextProvider';
 import { QueryBuilderProvider } from 'providers/QueryBuilder';
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import { Route, Router, Switch } from 'react-router-dom';
-import { CompatRouter } from 'react-router-dom-v5-compat';
 import { LicenseStatus } from 'types/api/licensesV3/getActive';
 import { extractDomain } from 'utils/app';
 
@@ -212,18 +212,20 @@ function App(): JSX.Element {
 		activeLicenseFetchError,
 	]);
 
+	const isDarkMode = useIsDarkMode();
+
+	useEffect(() => {
+		window.Pylon?.('setTheme', isDarkMode ? 'dark' : 'light');
+	}, [isDarkMode]);
+
 	useEffect(() => {
 		if (
 			pathname === ROUTES.ONBOARDING ||
 			pathname.startsWith('/public/dashboard/')
 		) {
-			// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-			// @ts-ignore
-			window.Pylon('hideChatBubble');
+			window.Pylon?.('hideChatBubble');
 		} else {
-			// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-			// @ts-ignore
-			window.Pylon('showChatBubble');
+			window.Pylon?.('showChatBubble');
 		}
 	}, [pathname]);
 
@@ -324,6 +326,19 @@ function App(): JSX.Element {
 					// Session Replay
 					replaysSessionSampleRate: 0.1, // This sets the sample rate at 10%. You may want to change it to 100% while in development and then sample at a lower rate in production.
 					replaysOnErrorSampleRate: 1.0, // If you're not already sampling the entire session, change the sample rate to 100% when sampling sessions where errors occur.
+					beforeSend(event) {
+						const sessionReplayUrl = posthog.get_session_replay_url?.({
+							withTimestamp: true,
+						});
+						if (sessionReplayUrl) {
+							// eslint-disable-next-line no-param-reassign
+							event.contexts = {
+								...event.contexts,
+								posthog: { session_replay_url: sessionReplayUrl },
+							};
+						}
+						return event;
+					},
 				});
 
 				setIsSentryInitialized(true);
@@ -364,41 +379,42 @@ function App(): JSX.Element {
 			<ConfigProvider theme={themeConfig}>
 				<Router history={history}>
 					<CompatRouter>
-						<KBarCommandPaletteProvider>
-							<KBarCommandPalette />
+						<CmdKProvider>
 							<NotificationProvider>
 								<ErrorModalProvider>
+									{isLoggedInState && <CmdKPalette userRole={user.role} />}
+									{isLoggedInState && (
+										<ShiftHoldOverlayController userRole={user.role} />
+									)}
 									<PrivateRoute>
 										<ResourceProvider>
 											<QueryBuilderProvider>
-												<DashboardProvider>
-													<KeyboardHotkeysProvider>
-														<AppLayout>
-															<PreferenceContextProvider>
-																<Suspense fallback={<Spinner size="large" tip="Loading..." />}>
-																	<Switch>
-																		{routes.map(({ path, component, exact }) => (
-																			<Route
-																				key={`${path}`}
-																				exact={exact}
-																				path={path}
-																				component={component}
-																			/>
-																		))}
-																		<Route exact path="/" component={Home} />
-																		<Route path="*" component={NotFound} />
-																	</Switch>
-																</Suspense>
-															</PreferenceContextProvider>
-														</AppLayout>
-													</KeyboardHotkeysProvider>
-												</DashboardProvider>
+												<KeyboardHotkeysProvider>
+													<AppLayout>
+														<PreferenceContextProvider>
+															<Suspense fallback={<Spinner size="large" tip="Loading..." />}>
+																<Switch>
+																	{routes.map(({ path, component, exact }) => (
+																		<Route
+																			key={`${path}`}
+																			exact={exact}
+																			path={path}
+																			component={component}
+																		/>
+																	))}
+																	<Route exact path="/" component={Home} />
+																	<Route path="*" component={NotFound} />
+																</Switch>
+															</Suspense>
+														</PreferenceContextProvider>
+													</AppLayout>
+												</KeyboardHotkeysProvider>
 											</QueryBuilderProvider>
 										</ResourceProvider>
 									</PrivateRoute>
 								</ErrorModalProvider>
 							</NotificationProvider>
-						</KBarCommandPaletteProvider>
+						</CmdKProvider>
 					</CompatRouter>
 				</Router>
 			</ConfigProvider>

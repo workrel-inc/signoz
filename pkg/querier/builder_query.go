@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -11,11 +12,15 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/SigNoz/signoz/pkg/errors"
 	"github.com/SigNoz/signoz/pkg/telemetrystore"
+	"github.com/SigNoz/signoz/pkg/telemetrytraces"
+	"github.com/SigNoz/signoz/pkg/types/ctxtypes"
+	"github.com/SigNoz/signoz/pkg/types/instrumentationtypes"
 	qbtypes "github.com/SigNoz/signoz/pkg/types/querybuildertypes/querybuildertypesv5"
 	"github.com/SigNoz/signoz/pkg/types/telemetrytypes"
 )
 
 type builderQuery[T any] struct {
+	logger         *slog.Logger
 	telemetryStore telemetrystore.TelemetryStore
 	stmtBuilder    qbtypes.StatementBuilder[T]
 	spec           qbtypes.QueryBuilderQuery[T]
@@ -29,6 +34,7 @@ type builderQuery[T any] struct {
 var _ qbtypes.Query = (*builderQuery[any])(nil)
 
 func newBuilderQuery[T any](
+	logger *slog.Logger,
 	telemetryStore telemetrystore.TelemetryStore,
 	stmtBuilder qbtypes.StatementBuilder[T],
 	spec qbtypes.QueryBuilderQuery[T],
@@ -37,6 +43,7 @@ func newBuilderQuery[T any](
 	variables map[string]qbtypes.VariableItem,
 ) *builderQuery[T] {
 	return &builderQuery[T]{
+		logger:         logger,
 		telemetryStore: telemetryStore,
 		stmtBuilder:    stmtBuilder,
 		spec:           spec,
@@ -78,11 +85,16 @@ func (q *builderQuery[T]) Fingerprint() string {
 			case qbtypes.LogAggregation:
 				aggParts = append(aggParts, a.Expression)
 			case qbtypes.MetricAggregation:
-				aggParts = append(aggParts, fmt.Sprintf("%s:%s:%s:%s",
+				var spaceAggParamStr string
+				if a.ComparisonSpaceAggregationParam != nil {
+					spaceAggParamStr = a.ComparisonSpaceAggregationParam.StringValue()
+				}
+				aggParts = append(aggParts, fmt.Sprintf("%s:%s:%s:%s:%s",
 					a.MetricName,
 					a.Temporality.StringValue(),
 					a.TimeAggregation.StringValue(),
 					a.SpaceAggregation.StringValue(),
+					spaceAggParamStr,
 				))
 			}
 		}
@@ -203,8 +215,13 @@ func (q *builderQuery[T]) Execute(ctx context.Context) (*qbtypes.Result, error) 
 	return result, nil
 }
 
-// executeWithContext executes the query with query window and step context for partial value detection
+// executeWithContext executes the query with query window and step context for partial value detection.
 func (q *builderQuery[T]) executeWithContext(ctx context.Context, query string, args []any) (*qbtypes.Result, error) {
+	ctx = ctxtypes.NewContextWithCommentVals(ctx, map[string]string{
+		instrumentationtypes.TelemetrySignal: q.spec.Signal.StringValue(),
+		instrumentationtypes.QueryDuration:   instrumentationtypes.DurationBucket(q.fromMS, q.toMS),
+	})
+
 	totalRows := uint64(0)
 	totalBytes := uint64(0)
 	elapsed := time.Duration(0)
@@ -292,6 +309,45 @@ func (q *builderQuery[T]) executeWindowList(ctx context.Context) (*qbtypes.Resul
 	totalRows := uint64(0)
 	totalBytes := uint64(0)
 	start := time.Now()
+
+	// Check if filter contains trace_id(s) and optimize time range if needed
+	if q.spec.Signal == telemetrytypes.SignalTraces &&
+		q.spec.Filter != nil && q.spec.Filter.Expression != "" {
+
+		traceIDs, found := telemetrytraces.ExtractTraceIDsFromFilter(q.spec.Filter.Expression)
+		if found && len(traceIDs) > 0 {
+			finder := telemetrytraces.NewTraceTimeRangeFinder(q.telemetryStore)
+
+			traceStart, traceEnd, ok := finder.GetTraceTimeRangeMulti(ctx, traceIDs)
+			traceStartMS := uint64(traceStart) / 1_000_000
+			traceEndMS := uint64(traceEnd) / 1_000_000
+			if !ok {
+				q.logger.DebugContext(ctx, "failed to get trace time range", slog.Any("trace_ids", traceIDs))
+			} else if traceStartMS > 0 && traceEndMS > 0 {
+				// no overlap — nothing to return
+				if uint64(traceStartMS) > toMS || uint64(traceEndMS) < fromMS {
+					return &qbtypes.Result{
+						Type: qbtypes.RequestTypeRaw,
+						Value: &qbtypes.RawData{
+							QueryName: q.spec.Name,
+						},
+						Stats: qbtypes.ExecStats{
+							DurationMS: uint64(time.Since(start).Milliseconds()),
+						},
+					}, nil
+				}
+
+				// clamp window to trace time range before bucketing
+				if uint64(traceStartMS) > fromMS {
+					fromMS = uint64(traceStartMS)
+				}
+				if uint64(traceEndMS) < toMS {
+					toMS = uint64(traceEndMS)
+				}
+				q.logger.DebugContext(ctx, "optimized time range for traces", slog.Any("trace_ids", traceIDs), slog.Uint64("start", fromMS), slog.Uint64("end", toMS))
+			}
+		}
+	}
 
 	// Get buckets and reverse them for ascending order
 	buckets := makeBuckets(fromMS, toMS)

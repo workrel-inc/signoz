@@ -1,8 +1,10 @@
 package telemetrymetrics
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/SigNoz/signoz/pkg/errors"
 	"github.com/SigNoz/signoz/pkg/types/metrictypes"
 )
 
@@ -39,12 +41,12 @@ var (
 	// when the query requests for almost 1 day, but not exactly 1 day, we need to add an offset to the end time
 	// to make sure that we are using the correct table
 	// this is because the start gets adjusted to the nearest step interval and uses the 5m table for 4m step interval
-	// leading to time series that doesn't best represent the rate of change
+	// leading to time series that doesn't best represent the rate of change.
 	offsetBucket = uint64(60 * time.Minute.Milliseconds())
 )
 
 // WhichTSTableToUse returns adjusted start, adjusted end, distributed table name, local table name
-// in that order
+// in that order.
 func WhichTSTableToUse(
 	start, end uint64,
 	tableHints *metrictypes.MetricTableHints,
@@ -127,7 +129,7 @@ func CountExpressionForSamplesTable(tableName string) string {
 // 1. distributed_samples_v4
 // 2. distributed_samples_v4_agg_5m - for queries with time range above or equal to 1 day and less than 1 week
 // 3. distributed_samples_v4_agg_30m - for queries with time range above or equal to 1 week
-// if the `timeAggregation` is `count_distinct` we can't use the aggregated tables because they don't support it
+// if the `timeAggregation` is `count_distinct` we can't use the aggregated tables because they don't support it.
 func WhichSamplesTableToUse(
 	start, end uint64,
 	metricType metrictypes.Type,
@@ -168,7 +170,7 @@ func AggregationColumnForSamplesTable(
 	temporality metrictypes.Temporality,
 	timeAggregation metrictypes.TimeAggregation,
 	tableHints *metrictypes.MetricTableHints,
-) string {
+) (string, error) {
 	tableName := WhichSamplesTableToUse(start, end, metricType, timeAggregation, tableHints)
 	var aggregationColumn string
 	switch temporality {
@@ -298,5 +300,29 @@ func AggregationColumnForSamplesTable(
 			}
 		}
 	}
-	return aggregationColumn
+	if aggregationColumn == "" {
+		return "", errors.Newf(
+			errors.TypeInvalidInput,
+			errors.CodeInvalidInput,
+			"invalid time aggregation, should be one of the following: [`latest`, `sum`, `avg`, `min`, `max`, `count`, `rate`, `increase`]",
+		)
+	}
+	return aggregationColumn, nil
+}
+
+func AggregationQueryForHistogramCountWithParams(param *metrictypes.ComparisonSpaceAggregationParam) (string, error) {
+	if param == nil {
+		return "", errors.New(errors.TypeInvalidInput, errors.CodeInvalidInput, "no aggregation param provided for histogram count")
+	}
+	histogramCountThreshold := param.Threshold
+
+	switch param.Operater {
+	case "<=":
+		return fmt.Sprintf("argMaxIf(value, toFloat64(le), toFloat64(le) <= %f) + (argMinIf(value, toFloat64(le), toFloat64(le) > %f) - argMaxIf(value, toFloat64(le), toFloat64(le) <= %f)) * (%f - maxIf(toFloat64(le), toFloat64(le) <= %f)) / (minIf(toFloat64(le), toFloat64(le) > %f) - maxIf(toFloat64(le), toFloat64(le) <= %f)) AS value", histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold), nil
+	case ">":
+		return fmt.Sprintf("argMax(value, toFloat64(le)) - (argMaxIf(value, toFloat64(le), toFloat64(le) <= %f) + (argMinIf(value, toFloat64(le), toFloat64(le) > %f) - argMaxIf(value, toFloat64(le), toFloat64(le) <= %f)) * (%f - maxIf(toFloat64(le), toFloat64(le) <= %f)) / (minIf(toFloat64(le), toFloat64(le) > %f) - maxIf(toFloat64(le), toFloat64(le) <= %f))) AS value", histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold, histogramCountThreshold), nil
+	default:
+		return "", errors.New(errors.TypeInvalidInput, errors.CodeInvalidInput, "invalid space aggregation operator, should be one of the following: [`<=`, `>`]")
+	}
+
 }

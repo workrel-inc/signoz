@@ -1,9 +1,14 @@
-import './InfraMonitoring.styles.scss';
-
+import { Dispatch, SetStateAction } from 'react';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Color } from '@signozhq/design-tokens';
-import { Progress, TabsProps, Tag, Tooltip } from 'antd';
-import { ColumnType } from 'antd/es/table';
+import {
+	Progress,
+	TableColumnType as ColumnType,
+	Tag,
+	Tooltip,
+	Typography,
+} from 'antd';
+import { SortOrder } from 'antd/lib/table/interface';
 import {
 	HostData,
 	HostListPayload,
@@ -13,23 +18,75 @@ import {
 	FiltersType,
 	IQuickFiltersConfig,
 } from 'components/QuickFilters/types';
-import TabLabel from 'components/TabLabel';
-import { PANEL_TYPES } from 'constants/queryBuilder';
-import { Dispatch, SetStateAction } from 'react';
+import { TriangleAlert } from 'lucide-react';
 import { ErrorResponse, SuccessResponse } from 'types/api';
 import { DataTypes } from 'types/api/queryBuilder/queryAutocompleteResponse';
 import { TagFilter } from 'types/api/queryBuilder/queryBuilderData';
 import { DataSource } from 'types/common/queryBuilder';
 
-import HostsList from './HostsList';
+import { OrderBySchemaType } from '../InfraMonitoringK8s/schemas';
 
 export interface HostRowData {
+	key?: string;
 	hostName: string;
 	cpu: React.ReactNode;
 	memory: React.ReactNode;
 	wait: string;
 	load15: number;
 	active: React.ReactNode;
+}
+
+const HOSTNAME_DOCS_URL =
+	'https://signoz.io/docs/infrastructure-monitoring/hostmetrics/#host-name-is-blankempty';
+
+export function HostnameCell({
+	hostName,
+}: {
+	hostName?: string | null;
+}): React.ReactElement {
+	const isEmpty = !hostName || !hostName.trim();
+	if (!isEmpty) {
+		return <div className="hostname-column-value">{hostName}</div>;
+	}
+	return (
+		<div className="hostname-cell-missing">
+			<Typography.Text type="secondary" className="hostname-cell-placeholder">
+				-
+			</Typography.Text>
+			<Tooltip
+				title={
+					<div>
+						Missing host.name metadata.
+						<br />
+						<a
+							href={HOSTNAME_DOCS_URL}
+							target="_blank"
+							rel="noopener noreferrer"
+							onClick={(e): void => e.stopPropagation()}
+						>
+							Learn how to configure →
+						</a>
+					</div>
+				}
+				trigger={['hover', 'focus']}
+			>
+				<span
+					className="hostname-cell-warning-icon"
+					tabIndex={0}
+					role="img"
+					aria-label="Missing host.name metadata"
+					onClick={(e): void => e.stopPropagation()}
+					onKeyDown={(e): void => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.stopPropagation();
+						}
+					}}
+				>
+					<TriangleAlert size={14} color={Color.BG_CHERRY_500} />
+				</span>
+			</Tooltip>
+		</div>
+	);
 }
 
 export interface HostsListTableProps {
@@ -50,6 +107,21 @@ export interface HostsListTableProps {
 		orderBy: { columnName: string; order: 'asc' | 'desc' } | null,
 	) => void;
 	setPageSize: (pageSize: number) => void;
+	orderBy: OrderBySchemaType;
+}
+
+export interface EmptyOrLoadingViewProps {
+	isError: boolean;
+	data:
+		| ErrorResponse<string>
+		| SuccessResponse<HostListResponse, unknown>
+		| undefined;
+	showHostsEmptyState: boolean;
+	sentAnyHostMetricsData: boolean;
+	isSendingIncorrectK8SAgentMetrics: boolean;
+	showEndTimeBeforeRetentionMessage: boolean;
+	showNoRecordsInSelectedTimeRangeMessage: boolean;
+	showTableLoadingState: boolean;
 }
 
 export const getHostListsQuery = (): HostListPayload => ({
@@ -61,26 +133,38 @@ export const getHostListsQuery = (): HostListPayload => ({
 	orderBy: { columnName: 'cpu', order: 'desc' },
 });
 
-export const getTabsItems = (): TabsProps['items'] => [
-	{
-		label: <TabLabel label="List View" isDisabled={false} tooltipText="" />,
-		key: PANEL_TYPES.LIST,
-		children: <HostsList />,
-	},
-];
+function mapOrderByToSortOrder(
+	column: string,
+	orderBy: OrderBySchemaType,
+): SortOrder | undefined {
+	return orderBy?.columnName === column
+		? orderBy?.order === 'asc'
+			? 'ascend'
+			: 'descend'
+		: undefined;
+}
 
-export const getHostsListColumns = (): ColumnType<HostRowData>[] => [
+export const getHostsListColumns = (
+	orderBy: OrderBySchemaType,
+): ColumnType<HostRowData>[] => [
 	{
 		title: <div className="hostname-column-header">Hostname</div>,
 		dataIndex: 'hostName',
 		key: 'hostName',
 		width: 250,
-		render: (value: string): React.ReactNode => (
-			<div className="hostname-column-value">{value}</div>
+		render: (value: string | undefined): React.ReactNode => (
+			<HostnameCell hostName={value ?? ''} />
 		),
 	},
 	{
-		title: 'Status',
+		title: (
+			<div className="status-header">
+				Status
+				<Tooltip title="Sent system metrics in last 10 mins">
+					<InfoCircleOutlined />
+				</Tooltip>
+			</div>
+		),
 		dataIndex: 'active',
 		key: 'active',
 		width: 100,
@@ -91,6 +175,7 @@ export const getHostsListColumns = (): ColumnType<HostRowData>[] => [
 		key: 'cpu',
 		width: 100,
 		sorter: true,
+		defaultSortOrder: mapOrderByToSortOrder('cpu', orderBy),
 		align: 'right',
 	},
 	{
@@ -106,6 +191,7 @@ export const getHostsListColumns = (): ColumnType<HostRowData>[] => [
 		key: 'memory',
 		width: 100,
 		sorter: true,
+		defaultSortOrder: mapOrderByToSortOrder('memory', orderBy),
 		align: 'right',
 	},
 	{
@@ -114,6 +200,7 @@ export const getHostsListColumns = (): ColumnType<HostRowData>[] => [
 		key: 'wait',
 		width: 100,
 		sorter: true,
+		defaultSortOrder: mapOrderByToSortOrder('wait', orderBy),
 		align: 'right',
 	},
 	{
@@ -122,6 +209,7 @@ export const getHostsListColumns = (): ColumnType<HostRowData>[] => [
 		key: 'load15',
 		width: 100,
 		sorter: true,
+		defaultSortOrder: mapOrderByToSortOrder('load15', orderBy),
 		align: 'right',
 	},
 ];
@@ -146,8 +234,12 @@ export const formatDataForTable = (data: HostData[]): HostRowData[] =>
 					size="small"
 					strokeColor={((): string => {
 						const cpuPercent = Number((host.cpu * 100).toFixed(1));
-						if (cpuPercent >= 90) return Color.BG_SAKURA_500;
-						if (cpuPercent >= 60) return Color.BG_AMBER_500;
+						if (cpuPercent >= 90) {
+							return Color.BG_SAKURA_500;
+						}
+						if (cpuPercent >= 60) {
+							return Color.BG_AMBER_500;
+						}
 						return Color.BG_FOREST_500;
 					})()}
 					className="progress-bar"
@@ -162,8 +254,12 @@ export const formatDataForTable = (data: HostData[]): HostRowData[] =>
 					size="small"
 					strokeColor={((): string => {
 						const memoryPercent = Number((host.memory * 100).toFixed(1));
-						if (memoryPercent >= 90) return Color.BG_CHERRY_500;
-						if (memoryPercent >= 60) return Color.BG_AMBER_500;
+						if (memoryPercent >= 90) {
+							return Color.BG_CHERRY_500;
+						}
+						if (memoryPercent >= 60) {
+							return Color.BG_AMBER_500;
+						}
 						return Color.BG_FOREST_500;
 					})()}
 					className="progress-bar"

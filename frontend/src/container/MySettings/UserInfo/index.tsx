@@ -1,22 +1,23 @@
-import '../MySettings.styles.scss';
-import './UserInfo.styles.scss';
-
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Input, Modal, Typography } from 'antd';
 import logEvent from 'api/common/logEvent';
+import { useUpdateMyUserV2 } from 'api/generated/services/users';
 import changeMyPassword from 'api/v1/factor_password/changeMyPassword';
-import editUser from 'api/v1/user/id/update';
 import { useNotifications } from 'hooks/useNotifications';
 import { Check, FileTerminal, MailIcon, UserIcon } from 'lucide-react';
 import { useAppContext } from 'providers/App/App';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import APIError from 'types/api/error';
+
+import '../MySettings.styles.scss';
+import './UserInfo.styles.scss';
 
 function UserInfo(): JSX.Element {
 	const { user, org, updateUser } = useAppContext();
 	const { t } = useTranslation(['routes', 'settings', 'common']);
 
 	const { notifications } = useNotifications();
+	const { mutateAsync: updateMyUser } = useUpdateMyUserV2();
 
 	const [currentPassword, setCurrentPassword] = useState<string>('');
 	const [updatePassword, setUpdatePassword] = useState<string>('');
@@ -92,10 +93,7 @@ function UserInfo(): JSX.Element {
 		);
 		try {
 			setIsLoading(true);
-			await editUser({
-				displayName: changedName,
-				userId: user.id,
-			});
+			await updateMyUser({ data: { displayName: changedName } });
 
 			notifications.success({
 				message: t('success', {

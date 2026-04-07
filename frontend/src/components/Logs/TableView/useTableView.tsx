@@ -1,14 +1,11 @@
-import './useTableView.styles.scss';
-
-import { Typography } from 'antd';
-import { ColumnsType } from 'antd/es/table';
+import { useMemo } from 'react';
+import { TableColumnsType as ColumnsType } from 'antd';
 import cx from 'classnames';
 import { DATE_TIME_FORMATS } from 'constants/dateTimeFormats';
 import { getSanitizedLogBody } from 'container/LogDetailedView/utils';
 import { useIsDarkMode } from 'hooks/useDarkMode';
 import { FlatLogData } from 'lib/logs/flatLogData';
 import { useTimezone } from 'providers/Timezone';
-import { useMemo } from 'react';
 
 import LogStateIndicator from '../LogStateIndicator/LogStateIndicator';
 import {
@@ -22,6 +19,8 @@ import {
 	UseTableViewProps,
 	UseTableViewResult,
 } from './types';
+
+import './useTableView.styles.scss';
 
 export const useTableView = (props: UseTableViewProps): UseTableViewResult => {
 	const {
@@ -44,7 +43,7 @@ export const useTableView = (props: UseTableViewProps): UseTableViewResult => {
 	const bodyColumnStyle = useMemo(
 		() => ({
 			...defaultTableStyle,
-			...(fields.length > 2 ? { width: '50rem' } : {}),
+			...(fields.length > 2 ? { width: 'auto' } : {}),
 		}),
 		[fields.length],
 	);
@@ -60,18 +59,18 @@ export const useTableView = (props: UseTableViewProps): UseTableViewResult => {
 				key: name,
 				render: (field): ColumnTypeRender<Record<string, unknown>> => ({
 					props: {
-						style: isListViewPanel
-							? defaultListViewPanelStyle
-							: getDefaultCellStyle(isDarkMode),
+						style: {
+							...(isListViewPanel
+								? defaultListViewPanelStyle
+								: getDefaultCellStyle(isDarkMode)),
+							display: '-webkit-box',
+							WebkitLineClamp: linesPerRow,
+							WebkitBoxOrient: 'vertical',
+							overflow: 'hidden',
+							wordBreak: 'break-all',
+						},
 					},
-					children: (
-						<Typography.Paragraph
-							ellipsis={{ rows: linesPerRow }}
-							className={cx('paragraph', fontSize)}
-						>
-							{field}
-						</Typography.Paragraph>
-					),
+					children: <p className={cx('paragraph', fontSize)}>{field}</p>,
 				}),
 			}));
 
@@ -84,7 +83,6 @@ export const useTableView = (props: UseTableViewProps): UseTableViewResult => {
 				// We do not need any title and data index for the log state indicator
 				title: '',
 				dataIndex: '',
-				// eslint-disable-next-line sonarjs/no-duplicate-string
 				key: 'state-indicator',
 				accessorKey: 'state-indicator',
 				id: 'state-indicator',
@@ -125,9 +123,7 @@ export const useTableView = (props: UseTableViewProps): UseTableViewResult => {
 								return {
 									children: (
 										<div className="table-timestamp">
-											<Typography.Paragraph ellipsis className={cx('text', fontSize)}>
-												{date}
-											</Typography.Paragraph>
+											<p className={cx('text', fontSize)}>{date}</p>
 										</div>
 									),
 								};

@@ -9,6 +9,7 @@ import (
 	"github.com/SigNoz/signoz/pkg/types/metrictypes"
 	"github.com/SigNoz/signoz/pkg/types/telemetrytypes"
 	"github.com/SigNoz/signoz/pkg/valuer"
+	"github.com/swaggest/jsonschema-go"
 )
 
 type QueryEnvelope struct {
@@ -18,7 +19,72 @@ type QueryEnvelope struct {
 	Spec any `json:"spec"`
 }
 
-// implement custom json unmarshaler for the QueryEnvelope
+// queryEnvelopeBuilderTrace is the OpenAPI schema for a QueryEnvelope with type=builder_query and signal=traces.
+type queryEnvelopeBuilderTrace struct {
+	Type QueryType                           `json:"type" description:"The type of the query."`
+	Spec QueryBuilderQuery[TraceAggregation] `json:"spec" description:"The trace builder query specification."`
+}
+
+// queryEnvelopeBuilderLog is the OpenAPI schema for a QueryEnvelope with type=builder_query and signal=logs.
+type queryEnvelopeBuilderLog struct {
+	Type QueryType                         `json:"type" description:"The type of the query."`
+	Spec QueryBuilderQuery[LogAggregation] `json:"spec" description:"The log builder query specification."`
+}
+
+// queryEnvelopeBuilderMetric is the OpenAPI schema for a QueryEnvelope with type=builder_query and signal=metrics.
+type queryEnvelopeBuilderMetric struct {
+	Type QueryType                            `json:"type" description:"The type of the query."`
+	Spec QueryBuilderQuery[MetricAggregation] `json:"spec" description:"The metric builder query specification."`
+}
+
+// queryEnvelopeFormula is the OpenAPI schema for a QueryEnvelope with type=builder_formula.
+type queryEnvelopeFormula struct {
+	Type QueryType           `json:"type" description:"The type of the query."`
+	Spec QueryBuilderFormula `json:"spec" description:"The formula specification."`
+}
+
+// queryEnvelopeJoin is the OpenAPI schema for a QueryEnvelope with type=builder_join.
+// type queryEnvelopeJoin struct {
+// 	Type QueryType        `json:"type" description:"The type of the query."`
+// 	Spec QueryBuilderJoin `json:"spec" description:"The join specification."`
+// }
+
+// queryEnvelopeTraceOperator is the OpenAPI schema for a QueryEnvelope with type=builder_trace_operator.
+type queryEnvelopeTraceOperator struct {
+	Type QueryType                 `json:"type" description:"The type of the query."`
+	Spec QueryBuilderTraceOperator `json:"spec" description:"The trace operator specification."`
+}
+
+// queryEnvelopePromQL is the OpenAPI schema for a QueryEnvelope with type=promql.
+type queryEnvelopePromQL struct {
+	Type QueryType `json:"type" description:"The type of the query."`
+	Spec PromQuery `json:"spec" description:"The PromQL query specification."`
+}
+
+// queryEnvelopeClickHouseSQL is the OpenAPI schema for a QueryEnvelope with type=clickhouse_sql.
+type queryEnvelopeClickHouseSQL struct {
+	Type QueryType       `json:"type" description:"The type of the query."`
+	Spec ClickHouseQuery `json:"spec" description:"The ClickHouse SQL query specification."`
+}
+
+var _ jsonschema.OneOfExposer = QueryEnvelope{}
+
+// JSONSchemaOneOf returns the oneOf variants for the QueryEnvelope discriminated union.
+// Each variant represents a different query type with its corresponding spec schema.
+func (QueryEnvelope) JSONSchemaOneOf() []any {
+	return []any{
+		queryEnvelopeBuilderTrace{},
+		queryEnvelopeBuilderLog{},
+		queryEnvelopeBuilderMetric{},
+		queryEnvelopeFormula{},
+		// queryEnvelopeJoin{},
+		queryEnvelopeTraceOperator{},
+		queryEnvelopePromQL{},
+		queryEnvelopeClickHouseSQL{},
+	}
+}
+
+// implement custom json unmarshaler for the QueryEnvelope.
 func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 	var shadow struct {
 		Type QueryType       `json:"type"`
@@ -47,19 +113,19 @@ func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 		switch header.Signal {
 		case telemetrytypes.SignalTraces:
 			var spec QueryBuilderQuery[TraceAggregation]
-			if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "query spec"); err != nil {
+			if err := json.Unmarshal(shadow.Spec, &spec); err != nil {
 				return wrapUnmarshalError(err, "invalid trace builder query spec: %v", err)
 			}
 			q.Spec = spec
 		case telemetrytypes.SignalLogs:
 			var spec QueryBuilderQuery[LogAggregation]
-			if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "query spec"); err != nil {
+			if err := json.Unmarshal(shadow.Spec, &spec); err != nil {
 				return wrapUnmarshalError(err, "invalid log builder query spec: %v", err)
 			}
 			q.Spec = spec
 		case telemetrytypes.SignalMetrics:
 			var spec QueryBuilderQuery[MetricAggregation]
-			if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "query spec"); err != nil {
+			if err := json.Unmarshal(shadow.Spec, &spec); err != nil {
 				return wrapUnmarshalError(err, "invalid metric builder query spec: %v", err)
 			}
 			q.Spec = spec
@@ -75,6 +141,7 @@ func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 
 	case QueryTypeFormula:
 		var spec QueryBuilderFormula
+		// TODO(srikanthccv): use json.Unmarshal here after implementing custom unmarshaler for QueryBuilderFormula
 		if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "formula spec"); err != nil {
 			return wrapUnmarshalError(err, "invalid formula spec: %v", err)
 		}
@@ -82,6 +149,7 @@ func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 
 	case QueryTypeJoin:
 		var spec QueryBuilderJoin
+		// TODO(srikanthccv): use json.Unmarshal here after implementing custom unmarshaler for QueryBuilderJoin
 		if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "join spec"); err != nil {
 			return wrapUnmarshalError(err, "invalid join spec: %v", err)
 		}
@@ -89,13 +157,14 @@ func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 
 	case QueryTypeTraceOperator:
 		var spec QueryBuilderTraceOperator
-		if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "trace operator spec"); err != nil {
+		if err := json.Unmarshal(shadow.Spec, &spec); err != nil {
 			return wrapUnmarshalError(err, "invalid trace operator spec: %v", err)
 		}
 		q.Spec = spec
 
 	case QueryTypePromQL:
 		var spec PromQuery
+		// TODO(srikanthccv): use json.Unmarshal here after implementing custom unmarshaler for PromQuery
 		if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "PromQL spec"); err != nil {
 			return wrapUnmarshalError(err, "invalid PromQL spec: %v", err)
 		}
@@ -103,6 +172,7 @@ func (q *QueryEnvelope) UnmarshalJSON(data []byte) error {
 
 	case QueryTypeClickHouseSQL:
 		var spec ClickHouseQuery
+		// TODO(srikanthccv): use json.Unmarshal here after implementing custom unmarshaler for ClickHouseQuery
 		if err := UnmarshalJSONWithContext(shadow.Spec, &spec, "ClickHouse SQL spec"); err != nil {
 			return wrapUnmarshalError(err, "invalid ClickHouse SQL spec: %v", err)
 		}
@@ -126,7 +196,13 @@ type CompositeQuery struct {
 	Queries []QueryEnvelope `json:"queries"`
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling to provide better error messages
+// PrepareJSONSchema adds description to the CompositeQuery schema.
+func (c *CompositeQuery) PrepareJSONSchema(schema *jsonschema.Schema) error {
+	schema.WithDescription("Composite query containing one or more query envelopes. Each query envelope specifies its type and corresponding spec.")
+	return nil
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to provide better error messages.
 func (c *CompositeQuery) UnmarshalJSON(data []byte) error {
 	type Alias CompositeQuery
 
@@ -188,6 +264,16 @@ var (
 	TextBoxVariableType = VariableType{valuer.NewString("text")}
 )
 
+// Enum returns the acceptable values for VariableType.
+func (VariableType) Enum() []any {
+	return []any{
+		QueryVariableType,
+		DynamicVariableType,
+		CustomVariableType,
+		TextBoxVariableType,
+	}
+}
+
 type VariableItem struct {
 	Type  VariableType `json:"type"`
 	Value any          `json:"value"`
@@ -213,23 +299,31 @@ type QueryRangeRequest struct {
 	FormatOptions *FormatOptions `json:"formatOptions,omitempty"`
 }
 
-func (r *QueryRangeRequest) StepIntervalForQuery(name string) int64 {
+// PrepareJSONSchema adds description to the QueryRangeRequest schema.
+func (q *QueryRangeRequest) PrepareJSONSchema(schema *jsonschema.Schema) error {
+	schema.WithDescription("Request body for the v5 query range endpoint. Supports builder queries (traces, logs, metrics), formulas, joins, trace operators, PromQL, and ClickHouse SQL queries.")
+	return nil
+}
+
+func (r *QueryRangeRequest) StepIntervalForQuery(name string) (int64, error) {
 	stepsMap := make(map[string]int64)
 	for _, query := range r.CompositeQuery.Queries {
 		switch spec := query.Spec.(type) {
 		case QueryBuilderQuery[TraceAggregation]:
-			stepsMap[spec.Name] = int64(spec.StepInterval.Seconds())
+			stepsMap[spec.Name] = spec.StepInterval.Milliseconds()
 		case QueryBuilderQuery[LogAggregation]:
-			stepsMap[spec.Name] = int64(spec.StepInterval.Seconds())
+			stepsMap[spec.Name] = spec.StepInterval.Milliseconds()
 		case QueryBuilderQuery[MetricAggregation]:
-			stepsMap[spec.Name] = int64(spec.StepInterval.Seconds())
+			stepsMap[spec.Name] = spec.StepInterval.Milliseconds()
 		case PromQuery:
-			stepsMap[spec.Name] = int64(spec.Step.Seconds())
+			stepsMap[spec.Name] = spec.Step.Milliseconds()
+		case QueryBuilderTraceOperator:
+			stepsMap[spec.Name] = spec.StepInterval.Milliseconds()
 		}
 	}
 
 	if step, ok := stepsMap[name]; ok {
-		return step
+		return step, nil
 	}
 
 	exprStr := ""
@@ -243,12 +337,15 @@ func (r *QueryRangeRequest) StepIntervalForQuery(name string) int64 {
 		}
 	}
 
-	expression, _ := govaluate.NewEvaluableExpressionWithFunctions(exprStr, EvalFuncs())
+	expression, err := govaluate.NewEvaluableExpressionWithFunctions(exprStr, EvalFuncs())
+	if err != nil {
+		return 0, errors.NewInvalidInputf(errors.CodeInvalidInput, "failed to parse expression for formula query %q: %s", name, err.Error())
+	}
 	steps := []int64{}
 	for _, v := range expression.Vars() {
 		steps = append(steps, stepsMap[v])
 	}
-	return LCMList(steps)
+	return LCMList(steps), nil
 }
 
 func (r *QueryRangeRequest) NumAggregationForQuery(name string) int64 {
@@ -274,6 +371,102 @@ func (r *QueryRangeRequest) NumAggregationForQuery(name string) int64 {
 		}
 	}
 	return int64(numAgg)
+}
+
+// HasOrderSpecified returns true if any query has an explicit order provided.
+func (r *QueryRangeRequest) HasOrderSpecified() bool {
+	for _, query := range r.CompositeQuery.Queries {
+		switch spec := query.Spec.(type) {
+		case QueryBuilderQuery[TraceAggregation]:
+			if len(spec.Order) > 0 {
+				return true
+			}
+		case QueryBuilderQuery[LogAggregation]:
+			if len(spec.Order) > 0 {
+				return true
+			}
+		case QueryBuilderQuery[MetricAggregation]:
+			if len(spec.Order) > 0 {
+				return true
+			}
+		case QueryBuilderFormula:
+			if len(spec.Order) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// UseDefaultOrderBy applies UseDefaultOrderByForListQuery to every query in the
+// composite query when the request type is a list query (raw, raw_stream, trace).
+func (r *QueryRangeRequest) UseDefaultOrderBy() {
+
+	// Based on the request type, handle default order-bys
+	switch r.RequestType {
+	case RequestTypeRaw, RequestTypeRawStream, RequestTypeTrace:
+		for idx := range r.CompositeQuery.Queries {
+			r.CompositeQuery.Queries[idx].UseDefaultOrderByForListQuery()
+		}
+	}
+
+}
+
+// UseDefaultOrderByForListQuery applies a default timestamp-descending order
+// for list/raw queries when no explicit order is specified. This is intended
+// for raw data listing endpoints (e.g. export, list views) where a sensible
+// default sort is needed, not for aggregation or timeseries queries.
+func (q *QueryEnvelope) UseDefaultOrderByForListQuery() {
+	if len(q.GetOrder()) > 0 {
+		return
+	}
+
+	switch q.Spec.(type) {
+	case QueryBuilderQuery[TraceAggregation],
+		QueryBuilderTraceOperator:
+		q.SetOrder(
+			[]OrderBy{
+				{
+					Key: OrderByKey{
+						TelemetryFieldKey: telemetrytypes.TelemetryFieldKey{
+							Name:          "timestamp",
+							Signal:        telemetrytypes.SignalTraces,
+							FieldContext:  telemetrytypes.FieldContextSpan,
+							FieldDataType: telemetrytypes.FieldDataTypeNumber,
+						},
+					},
+					Direction: OrderDirectionDesc,
+				},
+			},
+		)
+	case QueryBuilderQuery[LogAggregation]:
+		q.SetOrder(
+			[]OrderBy{
+				{
+					Key: OrderByKey{
+						TelemetryFieldKey: telemetrytypes.TelemetryFieldKey{
+							Name:          "timestamp",
+							Signal:        telemetrytypes.SignalLogs,
+							FieldContext:  telemetrytypes.FieldContextLog,
+							FieldDataType: telemetrytypes.FieldDataTypeNumber,
+						},
+					},
+					Direction: OrderDirectionDesc,
+				},
+				{
+					Key: OrderByKey{
+						TelemetryFieldKey: telemetrytypes.TelemetryFieldKey{
+							Name:          "id",
+							Signal:        telemetrytypes.SignalLogs,
+							FieldContext:  telemetrytypes.FieldContextLog,
+							FieldDataType: telemetrytypes.FieldDataTypeString,
+						},
+					},
+					Direction: OrderDirectionDesc,
+				},
+			},
+		)
+	}
 }
 
 func (r *QueryRangeRequest) FuncsForQuery(name string) []Function {
@@ -320,6 +513,16 @@ func (r *QueryRangeRequest) IsAnomalyRequest() (*QueryBuilderQuery[MetricAggrega
 	return &q, hasAnomaly
 }
 
+func (r *QueryRangeRequest) TraceOperatorQueryIndex() int {
+	for idx, query := range r.CompositeQuery.Queries {
+		switch query.Spec.(type) {
+		case QueryBuilderTraceOperator:
+			return idx
+		}
+	}
+	return -1
+}
+
 // We do not support fill gaps for these queries. Maybe support in future?
 func (r *QueryRangeRequest) SkipFillGaps(name string) bool {
 	for _, query := range r.CompositeQuery.Queries {
@@ -337,7 +540,7 @@ func (r *QueryRangeRequest) SkipFillGaps(name string) bool {
 	return false
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling to disallow unknown fields
+// UnmarshalJSON implements custom JSON unmarshaling to disallow unknown fields.
 func (r *QueryRangeRequest) UnmarshalJSON(data []byte) error {
 	// Define a type alias to avoid infinite recursion
 	type Alias QueryRangeRequest
@@ -410,7 +613,7 @@ func (r *QueryRangeRequest) GetQueriesSupportingZeroDefault() map[string]bool {
 		expr = strings.ToLower(expr)
 		// only pure additive/counting operations should default to zero,
 		// while statistical/analytical operations should show gaps when there's no data to analyze.
-		// TODO: use newExprVisitor for getting the function used in the expression
+		// TODO(srikanthccv): use newExprVisitor for getting the function used in the expression
 		if strings.HasPrefix(expr, "count(") ||
 			strings.HasPrefix(expr, "count_distinct(") ||
 			strings.HasPrefix(expr, "sum(") ||

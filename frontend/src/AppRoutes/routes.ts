@@ -1,20 +1,21 @@
-import ROUTES from 'constants/routes';
-import MessagingQueues from 'pages/MessagingQueues';
-import MeterExplorer from 'pages/MeterExplorer';
 import { RouteProps } from 'react-router-dom';
+import ROUTES from 'constants/routes';
 
 import {
 	AlertHistory,
 	AlertOverview,
+	AlertTypeSelectionPage,
 	AllAlertChannels,
 	AllErrors,
 	ApiMonitoring,
 	CreateAlertChannelAlerts,
 	CreateNewAlerts,
 	DashboardPage,
+	DashboardsListPage,
 	DashboardWidget,
 	EditRulesPage,
 	ErrorDetails,
+	ForgotPassword,
 	Home,
 	InfrastructureMonitoring,
 	InstalledIntegrations,
@@ -26,8 +27,9 @@ import {
 	LogsExplorer,
 	LogsIndexToFields,
 	LogsSaveViews,
+	MessagingQueuesMainPage,
+	MeterExplorerPage,
 	MetricsExplorer,
-	NewDashboardPage,
 	OldLogsExplorer,
 	Onboarding,
 	OnboardingV2,
@@ -159,14 +161,14 @@ const routes: AppRoutes[] = [
 	{
 		path: ROUTES.ALL_DASHBOARD,
 		exact: true,
-		component: DashboardPage,
+		component: DashboardsListPage,
 		isPrivate: true,
 		key: 'ALL_DASHBOARD',
 	},
 	{
 		path: ROUTES.DASHBOARD,
 		exact: true,
-		component: NewDashboardPage,
+		component: DashboardPage,
 		isPrivate: true,
 		key: 'DASHBOARD',
 	},
@@ -197,6 +199,13 @@ const routes: AppRoutes[] = [
 		component: ListAllALertsPage,
 		isPrivate: true,
 		key: 'LIST_ALL_ALERT',
+	},
+	{
+		path: ROUTES.ALERT_TYPE_SELECTION,
+		exact: true,
+		component: AlertTypeSelectionPage,
+		isPrivate: true,
+		key: 'ALERT_TYPE_SELECTION',
 	},
 	{
 		path: ROUTES.ALERTS_NEW,
@@ -332,6 +341,13 @@ const routes: AppRoutes[] = [
 		key: 'LOGIN',
 	},
 	{
+		path: ROUTES.FORGOT_PASSWORD,
+		exact: true,
+		component: ForgotPassword,
+		isPrivate: false,
+		key: 'FORGOT_PASSWORD',
+	},
+	{
 		path: ROUTES.UN_AUTHORIZED,
 		exact: true,
 		component: UnAuthorized,
@@ -383,28 +399,28 @@ const routes: AppRoutes[] = [
 	{
 		path: ROUTES.MESSAGING_QUEUES_KAFKA,
 		exact: true,
-		component: MessagingQueues,
+		component: MessagingQueuesMainPage,
 		key: 'MESSAGING_QUEUES_KAFKA',
 		isPrivate: true,
 	},
 	{
 		path: ROUTES.MESSAGING_QUEUES_CELERY_TASK,
 		exact: true,
-		component: MessagingQueues,
+		component: MessagingQueuesMainPage,
 		key: 'MESSAGING_QUEUES_CELERY_TASK',
 		isPrivate: true,
 	},
 	{
 		path: ROUTES.MESSAGING_QUEUES_OVERVIEW,
 		exact: true,
-		component: MessagingQueues,
+		component: MessagingQueuesMainPage,
 		key: 'MESSAGING_QUEUES_OVERVIEW',
 		isPrivate: true,
 	},
 	{
 		path: ROUTES.MESSAGING_QUEUES_KAFKA_DETAIL,
 		exact: true,
-		component: MessagingQueues,
+		component: MessagingQueuesMainPage,
 		key: 'MESSAGING_QUEUES_KAFKA_DETAIL',
 		isPrivate: true,
 	},
@@ -447,21 +463,21 @@ const routes: AppRoutes[] = [
 	{
 		path: ROUTES.METER,
 		exact: true,
-		component: MeterExplorer,
+		component: MeterExplorerPage,
 		key: 'METER',
 		isPrivate: true,
 	},
 	{
 		path: ROUTES.METER_EXPLORER,
 		exact: true,
-		component: MeterExplorer,
+		component: MeterExplorerPage,
 		key: 'METER_EXPLORER',
 		isPrivate: true,
 	},
 	{
 		path: ROUTES.METER_EXPLORER_VIEWS,
 		exact: true,
-		component: MeterExplorer,
+		component: MeterExplorerPage,
 		key: 'METER_EXPLORER_VIEWS',
 		isPrivate: true,
 	},
@@ -497,6 +513,7 @@ export const oldRoutes = [
 	'/logs-save-views',
 	'/traces-save-views',
 	'/settings/access-tokens',
+	'/settings/api-keys',
 	'/messaging-queues',
 	'/alerts/edit',
 ];
@@ -507,7 +524,8 @@ export const oldNewRoutesMapping: Record<string, string> = {
 	'/logs-explorer/live': '/logs/logs-explorer/live',
 	'/logs-save-views': '/logs/saved-views',
 	'/traces-save-views': '/traces/saved-views',
-	'/settings/access-tokens': '/settings/api-keys',
+	'/settings/access-tokens': '/settings/service-accounts',
+	'/settings/api-keys': '/settings/service-accounts',
 	'/messaging-queues': '/messaging-queues/overview',
 	'/alerts/edit': '/alerts/overview',
 };

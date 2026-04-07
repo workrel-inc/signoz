@@ -1,12 +1,13 @@
+import { useCallback } from 'react';
+// eslint-disable-next-line no-restricted-imports
+import { useSelector } from 'react-redux';
 import { QueryParams } from 'constants/query';
 import { PANEL_TYPES } from 'constants/queryBuilder';
 import ROUTES from 'constants/routes';
 import useUpdatedQuery from 'container/GridCardLayout/useResolveQuery';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { useNotifications } from 'hooks/useNotifications';
-import { useDashboard } from 'providers/Dashboard/Dashboard';
-import { useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useDashboardStore } from 'providers/Dashboard/store/useDashboardStore';
 import { AppState } from 'store/reducers';
 import { Query, TagFilterItem } from 'types/api/queryBuilder/queryBuilderData';
 import { DataSource, MetricAggregateOperator } from 'types/common/queryBuilder';
@@ -49,7 +50,9 @@ export function useNavigateToExplorer(): (
 								...(item.filters?.items || []),
 								...selectedFilters,
 							].filter((item) => {
-								if (seen.has(item.id)) return false;
+								if (seen.has(item.id)) {
+									return false;
+								}
 								seen.add(item.id);
 								return true;
 							});
@@ -76,7 +79,7 @@ export function useNavigateToExplorer(): (
 	);
 
 	const { getUpdatedQuery } = useUpdatedQuery();
-	const { selectedDashboard } = useDashboard();
+	const { selectedDashboard } = useDashboardStore();
 	const { notifications } = useNotifications();
 
 	return useCallback(

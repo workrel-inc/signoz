@@ -1,6 +1,13 @@
 /* eslint-disable sonarjs/cognitive-complexity */
-import './WidgetFullView.styles.scss';
-
+import React, {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
+// eslint-disable-next-line no-restricted-imports
+import { useSelector } from 'react-redux'; // old code, TODO: fix this correctly
 import {
 	LoadingOutlined,
 	SearchOutlined,
@@ -17,6 +24,7 @@ import WarningPopover from 'components/WarningPopover/WarningPopover';
 import { ENTITY_VERSION_V5 } from 'constants/app';
 import { QueryParams } from 'constants/query';
 import { PANEL_TYPES } from 'constants/queryBuilder';
+import { PanelMode } from 'container/DashboardContainer/visualization/panels/types';
 import useDrilldown from 'container/GridCardLayout/GridCard/FullView/useDrilldown';
 import { populateMultipleResults } from 'container/NewWidget/LeftContainer/WidgetGraph/util';
 import {
@@ -25,23 +33,26 @@ import {
 } from 'container/NewWidget/RightContainer/timeItems';
 import PanelWrapper from 'container/PanelWrapper/PanelWrapper';
 import RightToolbarActions from 'container/QueryBuilder/components/ToolbarActions/RightToolbarActions';
+import { useDashboardVariables } from 'hooks/dashboard/useDashboardVariables';
 import { useGetQueryRange } from 'hooks/queryBuilder/useGetQueryRange';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { useChartMutable } from 'hooks/useChartMutable';
 import useComponentPermission from 'hooks/useComponentPermission';
 import { useSafeNavigate } from 'hooks/useSafeNavigate';
 import useUrlQuery from 'hooks/useUrlQuery';
-import { getDashboardVariables } from 'lib/dashbaordVariables/getDashboardVariables';
 import { GetQueryResultsProps } from 'lib/dashboard/getQueryResults';
+import { getDashboardVariables } from 'lib/dashboardVariables/getDashboardVariables';
 import GetMinMax from 'lib/getMinMax';
 import { isEmpty } from 'lodash-es';
 import { useAppContext } from 'providers/App/App';
-import { useDashboard } from 'providers/Dashboard/Dashboard';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
+import {
+	selectIsDashboardLocked,
+	useDashboardStore,
+} from 'providers/Dashboard/store/useDashboardStore';
 import { AppState } from 'store/reducers';
 import { Warning } from 'types/api';
 import { GlobalReducer } from 'types/reducer/globalTime';
+import { isModifierKeyPressed } from 'utils/app';
 import { getGraphType } from 'utils/getGraphType';
 import { getSortedSeriesData } from 'utils/getSortedSeriesData';
 
@@ -50,6 +61,8 @@ import { PANEL_TYPES_VS_FULL_VIEW_TABLE } from './contants';
 import PanelTypeSelector from './PanelTypeSelector';
 import { GraphContainer, TimeContainer } from './styles';
 import { FullViewProps } from './types';
+
+import './WidgetFullView.styles.scss';
 
 function FullView({
 	widget,
@@ -78,7 +91,16 @@ function FullView({
 		setCurrentGraphRef(fullViewRef);
 	}, [setCurrentGraphRef]);
 
-	const { selectedDashboard, isDashboardLocked } = useDashboard();
+	const { selectedDashboard, setColumnWidths } = useDashboardStore();
+	const isDashboardLocked = useDashboardStore(selectIsDashboardLocked);
+
+	const onColumnWidthsChange = useCallback(
+		(widths: Record<string, number>) => {
+			setColumnWidths((prev) => ({ ...prev, [widget.id]: widths }));
+		},
+		[setColumnWidths, widget.id],
+	);
+	const { dashboardVariables } = useDashboardVariables();
 	const { user } = useAppContext();
 
 	const [editWidget] = useComponentPermission(['edit_widget'], user.role);
@@ -114,19 +136,18 @@ function FullView({
 				graphType: getGraphType(selectedPanelType),
 				query: updatedQuery,
 				globalSelectedInterval: globalSelectedTime,
-				variables: getDashboardVariables(selectedDashboard?.data.variables),
+				variables: getDashboardVariables(dashboardVariables),
 				fillGaps: widget.fillSpans,
 				formatForWeb: selectedPanelType === PANEL_TYPES.TABLE,
 				originalGraphType: selectedPanelType,
 			};
 		}
-		updatedQuery.builder.queryData[0].pageSize = 10;
 		return {
 			query: updatedQuery,
 			graphType: PANEL_TYPES.LIST,
 			selectedTime: widget?.timePreferance || 'GLOBAL_TIME',
 			globalSelectedInterval: globalSelectedTime,
-			variables: getDashboardVariables(selectedDashboard?.data.variables),
+			variables: getDashboardVariables(dashboardVariables),
 			tableParams: {
 				pagination: {
 					offset: 0,
@@ -239,7 +260,6 @@ function FullView({
 
 	if (response.data && selectedPanelType === PANEL_TYPES.PIE) {
 		const transformedData = populateMultipleResults(response?.data);
-		// eslint-disable-next-line no-param-reassign
 		response.data = transformedData;
 	}
 
@@ -277,9 +297,11 @@ function FullView({
 											<Button
 												className="switch-edit-btn"
 												disabled={response.isFetching || response.isLoading}
-												onClick={(): void => {
+												onClick={(e: React.MouseEvent): void => {
 													if (dashboardEditView) {
-														safeNavigate(dashboardEditView);
+														safeNavigate(dashboardEditView, {
+															newTab: isModifierKeyPressed(e),
+														});
 													}
 												}}
 											>
@@ -365,6 +387,7 @@ function FullView({
 								/>
 							)}
 							<PanelWrapper
+								panelMode={PanelMode.STANDALONE_VIEW}
 								queryResponse={response}
 								widget={widget}
 								setRequestData={setRequestData}
@@ -378,6 +401,7 @@ function FullView({
 								onClickHandler={onClickHandler}
 								enableDrillDown={enableDrillDown}
 								selectedGraph={selectedPanelType}
+								onColumnWidthsChange={onColumnWidthsChange}
 							/>
 						</GraphContainer>
 					</div>

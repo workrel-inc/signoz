@@ -1,16 +1,17 @@
-import { InspectMetricsSeries } from 'api/metricsExplorer/getInspectMetricsDetails';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useQuery } from 'react-query';
+import { inspectMetrics } from 'api/generated/services/metrics';
 import { themeColors } from 'constants/theme';
-import { useGetInspectMetricsDetails } from 'hooks/metricsExplorer/useGetInspectMetricsDetails';
 import { useIsDarkMode } from 'hooks/useDarkMode';
 import { generateColor } from 'lib/uPlotLib/utils/generateColor';
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import { INITIAL_INSPECT_METRICS_OPTIONS } from './constants';
 import {
 	GraphPopoverData,
 	InspectionStep,
+	InspectMetricsSeries,
 	MetricInspectionAction,
-	MetricInspectionOptions,
+	MetricInspectionState,
 	UseInspectMetricsReturnData,
 } from './types';
 import {
@@ -20,37 +21,62 @@ import {
 } from './utils';
 
 const metricInspectionReducer = (
-	state: MetricInspectionOptions,
+	state: MetricInspectionState,
 	action: MetricInspectionAction,
-): MetricInspectionOptions => {
+): MetricInspectionState => {
 	switch (action.type) {
 		case 'SET_TIME_AGGREGATION_OPTION':
 			return {
 				...state,
-				timeAggregationOption: action.payload,
+				currentOptions: {
+					...state.currentOptions,
+					timeAggregationOption: action.payload,
+				},
 			};
 		case 'SET_TIME_AGGREGATION_INTERVAL':
 			return {
 				...state,
-				timeAggregationInterval: action.payload,
+				currentOptions: {
+					...state.currentOptions,
+					timeAggregationInterval: action.payload,
+				},
 			};
 		case 'SET_SPACE_AGGREGATION_OPTION':
 			return {
 				...state,
-				spaceAggregationOption: action.payload,
+				currentOptions: {
+					...state.currentOptions,
+					spaceAggregationOption: action.payload,
+				},
 			};
 		case 'SET_SPACE_AGGREGATION_LABELS':
 			return {
 				...state,
-				spaceAggregationLabels: action.payload,
+				currentOptions: {
+					...state.currentOptions,
+					spaceAggregationLabels: action.payload,
+				},
 			};
 		case 'SET_FILTERS':
 			return {
 				...state,
-				filters: action.payload,
+				currentOptions: {
+					...state.currentOptions,
+					filterExpression: action.payload,
+				},
+			};
+		case 'APPLY_METRIC_INSPECTION_OPTIONS':
+			return {
+				...state,
+				appliedOptions: {
+					...state.appliedOptions,
+					...state.currentOptions,
+				},
 			};
 		case 'RESET_INSPECTION':
-			return { ...INITIAL_INSPECT_METRICS_OPTIONS };
+			return {
+				...INITIAL_INSPECT_METRICS_OPTIONS,
+			};
 		default:
 			return state;
 	}
@@ -75,26 +101,58 @@ export function useInspectMetrics(
 	);
 
 	const {
-		data: inspectMetricsData,
+		data: inspectMetricsResponse,
 		isLoading: isInspectMetricsLoading,
 		isError: isInspectMetricsError,
 		isRefetching: isInspectMetricsRefetching,
-	} = useGetInspectMetricsDetails(
-		{
-			metricName: metricName ?? '',
+	} = useQuery({
+		queryKey: [
+			'inspectMetrics',
+			metricName,
 			start,
 			end,
-			filters: metricInspectionOptions.filters,
-		},
-		{
-			enabled: !!metricName,
-			keepPreviousData: true,
-		},
+			metricInspectionOptions.appliedOptions.filterExpression,
+		],
+		queryFn: ({ signal }) =>
+			inspectMetrics(
+				{
+					metricName: metricName ?? '',
+					start,
+					end,
+					filter: metricInspectionOptions.appliedOptions.filterExpression
+						? { expression: metricInspectionOptions.appliedOptions.filterExpression }
+						: undefined,
+				},
+				signal,
+			),
+		enabled: !!metricName,
+		keepPreviousData: true,
+	});
+
+	const inspectMetricsData = useMemo(
+		() => ({
+			series: (inspectMetricsResponse?.data?.series ?? []).map((s) => {
+				const labels: Record<string, string> = {};
+				for (const l of s.labels ?? []) {
+					if (l.key?.name) {
+						labels[l.key.name] = String(l.value ?? '');
+					}
+				}
+				return {
+					labels,
+					values: (s.values ?? []).map((v) => ({
+						timestamp: v.timestamp ?? 0,
+						value: String(v.value ?? 0),
+					})),
+				};
+			}) as InspectMetricsSeries[],
+		}),
+		[inspectMetricsResponse],
 	);
 	const isDarkMode = useIsDarkMode();
 
 	const inspectMetricsTimeSeries = useMemo(() => {
-		const series = inspectMetricsData?.payload?.data?.series ?? [];
+		const series = inspectMetricsData?.series ?? [];
 
 		return series.map((series, index) => {
 			const title = `TS${index + 1}`;
@@ -111,19 +169,27 @@ export function useInspectMetrics(
 		});
 	}, [inspectMetricsData, isDarkMode]);
 
-	const inspectMetricsStatusCode = useMemo(
-		() => inspectMetricsData?.statusCode || 200,
-		[inspectMetricsData],
-	);
-
 	// Evaluate inspection step
-	const inspectionStep = useMemo(() => {
-		if (metricInspectionOptions.spaceAggregationOption) {
+	const currentInspectionStep = useMemo(() => {
+		if (metricInspectionOptions.currentOptions.spaceAggregationOption) {
 			return InspectionStep.COMPLETED;
 		}
 		if (
-			metricInspectionOptions.timeAggregationOption &&
-			metricInspectionOptions.timeAggregationInterval
+			metricInspectionOptions.currentOptions.timeAggregationOption &&
+			metricInspectionOptions.currentOptions.timeAggregationInterval
+		) {
+			return InspectionStep.SPACE_AGGREGATION;
+		}
+		return InspectionStep.TIME_AGGREGATION;
+	}, [metricInspectionOptions]);
+
+	const appliedInspectionStep = useMemo(() => {
+		if (metricInspectionOptions.appliedOptions.spaceAggregationOption) {
+			return InspectionStep.COMPLETED;
+		}
+		if (
+			metricInspectionOptions.appliedOptions.timeAggregationOption &&
+			metricInspectionOptions.appliedOptions.timeAggregationInterval
 		) {
 			return InspectionStep.SPACE_AGGREGATION;
 		}
@@ -149,23 +215,26 @@ export function useInspectMetrics(
 
 		// Apply time aggregation once required options are set
 		if (
-			inspectionStep >= InspectionStep.SPACE_AGGREGATION &&
-			metricInspectionOptions.timeAggregationOption &&
-			metricInspectionOptions.timeAggregationInterval
+			appliedInspectionStep >= InspectionStep.SPACE_AGGREGATION &&
+			metricInspectionOptions.appliedOptions.timeAggregationOption &&
+			metricInspectionOptions.appliedOptions.timeAggregationInterval
 		) {
 			const {
 				timeAggregatedSeries,
 				timeAggregatedSeriesMap,
-			} = applyTimeAggregation(inspectMetricsTimeSeries, metricInspectionOptions);
+			} = applyTimeAggregation(
+				inspectMetricsTimeSeries,
+				metricInspectionOptions.appliedOptions,
+			);
 			timeSeries = timeAggregatedSeries;
 			setTimeAggregatedSeriesMap(timeAggregatedSeriesMap);
 			setAggregatedTimeSeries(timeSeries);
 		}
 		// Apply space aggregation
-		if (inspectionStep === InspectionStep.COMPLETED) {
+		if (appliedInspectionStep === InspectionStep.COMPLETED) {
 			const { aggregatedSeries, spaceAggregatedSeriesMap } = applySpaceAggregation(
 				timeSeries,
-				metricInspectionOptions,
+				metricInspectionOptions.appliedOptions,
 			);
 			timeSeries = aggregatedSeries;
 			setSpaceAggregatedSeriesMap(spaceAggregatedSeriesMap);
@@ -186,11 +255,11 @@ export function useInspectMetrics(
 
 		const rawData = [timestamps, ...timeseriesArray];
 		return rawData.map((series) => new Float64Array(series));
-	}, [inspectMetricsTimeSeries, inspectionStep, metricInspectionOptions]);
+	}, [inspectMetricsTimeSeries, appliedInspectionStep, metricInspectionOptions]);
 
 	const spaceAggregationLabels = useMemo(() => {
 		const labels = new Set<string>();
-		inspectMetricsData?.payload?.data.series.forEach((series) => {
+		inspectMetricsData?.series?.forEach((series) => {
 			Object.keys(series.labels).forEach((label) => {
 				labels.add(label);
 			});
@@ -209,14 +278,13 @@ export function useInspectMetrics(
 
 	return {
 		inspectMetricsTimeSeries,
-		inspectMetricsStatusCode,
 		isInspectMetricsLoading,
 		isInspectMetricsError,
 		formattedInspectMetricsTimeSeries,
 		spaceAggregationLabels,
 		metricInspectionOptions,
 		dispatchMetricInspectionOptions,
-		inspectionStep,
+		inspectionStep: currentInspectionStep,
 		isInspectMetricsRefetching,
 		spaceAggregatedSeriesMap,
 		aggregatedTimeSeries,

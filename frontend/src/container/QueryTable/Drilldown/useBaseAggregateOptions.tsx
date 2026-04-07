@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { LinkOutlined, LoadingOutlined } from '@ant-design/icons';
 import OverlayScrollbar from 'components/OverlayScrollbar/OverlayScrollbar';
 import { QueryParams } from 'constants/query';
@@ -9,9 +11,7 @@ import useContextVariables from 'hooks/dashboard/useContextVariables';
 import { useSafeNavigate } from 'hooks/useSafeNavigate';
 import createQueryParams from 'lib/createQueryParams';
 import ContextMenu from 'periscope/components/ContextMenu';
-import { useDashboard } from 'providers/Dashboard/Dashboard';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useDashboardStore } from 'providers/Dashboard/store/useDashboardStore';
 import { ContextLinksData } from 'types/api/dashboard/getAll';
 import { Query } from 'types/api/queryBuilder/queryBuilderData';
 
@@ -66,10 +66,12 @@ const useBaseAggregateOptions = ({
 		getUpdatedQuery,
 		isLoading: isResolveQueryLoading,
 	} = useUpdatedQuery();
-	const { selectedDashboard } = useDashboard();
+	const { selectedDashboard } = useDashboardStore();
 
 	useEffect(() => {
-		if (!aggregateData) return;
+		if (!aggregateData) {
+			return;
+		}
 		const resolveQuery = async (): Promise<void> => {
 			const updatedQuery = await getUpdatedQuery({
 				widgetConfig: {
@@ -94,7 +96,9 @@ const useBaseAggregateOptions = ({
 	});
 
 	const getContextLinksItems = useCallback(() => {
-		if (!contextLinks?.linksData) return [];
+		if (!contextLinks?.linksData) {
+			return [];
+		}
 
 		try {
 			const processedLinks = processContextLinks(
@@ -125,7 +129,6 @@ const useBaseAggregateOptions = ({
 
 	const handleBaseDrilldown = useCallback(
 		(key: string): void => {
-			console.log('Base drilldown:', { key, aggregateData });
 			const route = getRoute(key);
 			const timeRange = aggregateData?.timeRange;
 			const filtersToAdd = aggregateData?.filters || [];

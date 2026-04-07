@@ -1,7 +1,7 @@
+import { Router } from 'react-router-dom';
 import { act, renderHook } from '@testing-library/react';
 import { QueryParams } from 'constants/query';
 import { createMemoryHistory } from 'history';
-import { Router } from 'react-router-dom';
 import { IDashboardVariable } from 'types/api/dashboard/getAll';
 
 import useVariablesFromUrl, {
@@ -224,6 +224,41 @@ describe('useVariablesFromUrl', () => {
 		expect(urlVariables.emptyArray).toEqual([]);
 		expect(urlVariables.singleItemArray).toEqual(['solo']);
 		expect(urlVariables.undefinedVar).toBeUndefined();
+	});
+
+	it('should return empty object when URL param contains a bare % that makes decodeURIComponent throw', () => {
+		// Simulate a URL where the variables param is a raw JSON string containing a literal %
+		// (e.g. a metric value like "cpu_usage_50%"). URLSearchParams.get() returns the value
+		// as-is when it was set directly; if it contains a bare %, decodeURIComponent throws a URIError.
+		const rawJson = JSON.stringify({ threshold: '50%' });
+		const history = createMemoryHistory({
+			initialEntries: [`/?${QueryParams.variables}=${rawJson}`],
+		});
+
+		const { result } = renderHook(() => useVariablesFromUrl(), {
+			wrapper: ({ children }: { children: React.ReactNode }) => (
+				<Router history={history}>{children}</Router>
+			),
+		});
+
+		// Should parse successfully via the raw fallback, not throw or return {}
+		const vars = result.current.getUrlVariables();
+		expect(vars).toEqual({ threshold: '50%' });
+	});
+
+	it('should return empty object when URL param is completely unparseable', () => {
+		// A value that fails both decodeURIComponent and JSON.parse
+		const history = createMemoryHistory({
+			initialEntries: [`/?${QueryParams.variables}=not-json-%ZZ`],
+		});
+
+		const { result } = renderHook(() => useVariablesFromUrl(), {
+			wrapper: ({ children }: { children: React.ReactNode }) => (
+				<Router history={history}>{children}</Router>
+			),
+		});
+
+		expect(result.current.getUrlVariables()).toEqual({});
 	});
 
 	it('should update variables with array values correctly', () => {

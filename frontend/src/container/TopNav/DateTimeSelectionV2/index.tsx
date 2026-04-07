@@ -1,5 +1,8 @@
-import './DateTimeSelectionV2.styles.scss';
-
+import { useCallback, useEffect, useState } from 'react';
+// eslint-disable-next-line no-restricted-imports
+import { connect, useDispatch, useSelector } from 'react-redux';
+import { RouteComponentProps, withRouter } from 'react-router-dom';
+import { useNavigationType, useSearchParams } from 'react-router-dom-v5-compat';
 import { SyncOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import getLocalStorageKey from 'api/browser/localstorage/get';
@@ -11,42 +14,49 @@ import { QueryParams } from 'constants/query';
 import ROUTES from 'constants/routes';
 import NewExplorerCTA from 'container/NewExplorerCTA';
 import dayjs, { Dayjs } from 'dayjs';
+import {
+	useGlobalTimeQueryInvalidate,
+	useIsGlobalTimeQueryRefreshing,
+} from 'hooks/globalTime';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { useSafeNavigate } from 'hooks/useSafeNavigate';
 import useUrlQuery from 'hooks/useUrlQuery';
-import { isValidTimeFormat } from 'lib/getMinMax';
+import { isValidShortHandDateTimeFormat } from 'lib/getMinMax';
 import getTimeString from 'lib/getTimeString';
 import { cloneDeep, isObject } from 'lodash-es';
 import { Undo } from 'lucide-react';
 import { useTimezone } from 'providers/Timezone';
-import { useCallback, useEffect, useState } from 'react';
-import { connect, useDispatch, useSelector } from 'react-redux';
-import { RouteComponentProps, withRouter } from 'react-router-dom';
-import { useNavigationType, useSearchParams } from 'react-router-dom-v5-compat';
+// eslint-disable-next-line no-restricted-imports
 import { bindActionCreators, Dispatch } from 'redux';
 import { ThunkDispatch } from 'redux-thunk';
 import { GlobalTimeLoading, UpdateTimeInterval } from 'store/actions';
 import { AppState } from 'store/reducers';
 import AppActions from 'types/actions';
 import { GlobalReducer } from 'types/reducer/globalTime';
+import { addCustomTimeRange } from 'utils/customTimeRangeUtils';
+import { persistTimeDurationForRoute } from 'utils/metricsTimeStorageUtils';
 import { normalizeTimeToMs } from 'utils/timeUtils';
 import { v4 as uuid } from 'uuid';
 
 import AutoRefresh from '../AutoRefreshV2';
 import { DateTimeRangeType } from '../CustomDateTimeModal';
-import { RelativeTimeMap } from '../DateTimeSelection/config';
 import {
 	convertOldTimeToNewValidCustomTimeFormat,
-	CustomTimeType,
 	getDefaultOption,
 	getOptions,
-	LocalStorageTimeRange,
 	OLD_RELATIVE_TIME_VALUES,
-	Time,
-	TimeRange,
-} from './config';
+	RelativeTimeMap,
+} from './constants';
 import RefreshText from './Refresh';
 import { Form, FormContainer, FormItem } from './styles';
+import {
+	CustomTimeType,
+	LocalStorageTimeRange,
+	Time,
+	TimeRange,
+} from './types';
+
+import './DateTimeSelectionV2.styles.scss';
 
 function DateTimeSelection({
 	showAutoRefresh,
@@ -72,6 +82,11 @@ function DateTimeSelection({
 	const { safeNavigate } = useSafeNavigate();
 	const navigationType = useNavigationType(); // Returns 'POP' for back/forward navigation
 	const dispatch = useDispatch();
+
+	const { maxTime, minTime, selectedTime } = useSelector<
+		AppState,
+		GlobalReducer
+	>((state) => state.globalTime);
 
 	const [hasSelectedTimeError, setHasSelectedTimeError] = useState(false);
 	const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -174,11 +189,6 @@ function DateTimeSelection({
 
 	const { stagedQuery, currentQuery, initQueryBuilderData } = useQueryBuilder();
 
-	const { maxTime, minTime, selectedTime } = useSelector<
-		AppState,
-		GlobalReducer
-	>((state) => state.globalTime);
-
 	const getInputLabel = (
 		startTime?: Dayjs,
 		endTime?: Dayjs,
@@ -193,16 +203,6 @@ function DateTimeSelection({
 		}
 		return timeInterval;
 	};
-
-	useEffect(() => {
-		if (selectedTime === 'custom') {
-			setRefreshButtonHidden(true);
-			setCustomDTPickerVisible(true);
-		} else {
-			setRefreshButtonHidden(false);
-			setCustomDTPickerVisible(false);
-		}
-	}, [selectedTime]);
 
 	useEffect(() => {
 		if (isModalTimeSelection && modalSelectedInterval === 'custom') {
@@ -239,20 +239,7 @@ function DateTimeSelection({
 
 	const updateLocalStorageForRoutes = useCallback(
 		(value: Time | string): void => {
-			const preRoutes = getLocalStorageKey(LOCALSTORAGE.METRICS_TIME_IN_DURATION);
-			if (preRoutes !== null) {
-				const preRoutesObject = JSON.parse(preRoutes);
-
-				const preRoute = {
-					...preRoutesObject,
-				};
-				preRoute[location.pathname] = value;
-
-				setLocalStorageKey(
-					LOCALSTORAGE.METRICS_TIME_IN_DURATION,
-					JSON.stringify(preRoute),
-				);
-			}
+			persistTimeDurationForRoute(location.pathname, String(value));
 		},
 		[location.pathname],
 	);
@@ -369,8 +356,15 @@ function DateTimeSelection({
 		],
 	);
 
+	const isRefreshingQueries = useIsGlobalTimeQueryRefreshing();
+	const invalidateQueries = useGlobalTimeQueryInvalidate();
 	const onRefreshHandler = (): void => {
-		onSelectHandler(selectedTime);
+		invalidateQueries();
+		onSelectHandler(
+			isModalTimeSelection && modalSelectedInterval
+				? modalSelectedInterval
+				: selectedTime,
+		);
 		onLastRefreshHandler();
 	};
 	const handleReset = useCallback(() => {
@@ -408,11 +402,14 @@ function DateTimeSelection({
 				const startTime = startTimeMoment;
 				const endTime = endTimeMoment;
 				setCustomDTPickerVisible(false);
+				setRefreshButtonHidden(true);
 
 				updateTimeInterval('custom', [
 					startTime.toDate().getTime(),
 					endTime.toDate().getTime(),
 				]);
+
+				addCustomTimeRange([startTime, endTime]);
 
 				setLocalStorageKey('startTime', startTime.toString());
 				setLocalStorageKey('endTime', endTime.toString());
@@ -469,7 +466,10 @@ function DateTimeSelection({
 	): Time | CustomTimeType => {
 		// if the relativeTime param is present in the url give top most preference to the same
 		// if the relativeTime param is not valid then move to next preference
-		if (relativeTimeFromUrl != null && isValidTimeFormat(relativeTimeFromUrl)) {
+		if (
+			relativeTimeFromUrl != null &&
+			isValidShortHandDateTimeFormat(relativeTimeFromUrl)
+		) {
 			return relativeTimeFromUrl as Time;
 		}
 
@@ -535,7 +535,9 @@ function DateTimeSelection({
 
 	// Sync time picker state with URL on browser navigation
 	useEffect(() => {
-		if (navigationType !== 'POP') return;
+		if (navigationType !== 'POP') {
+			return;
+		}
 
 		if (searchStartTime && searchEndTime) {
 			handleAbsoluteTimeSync(searchStartTime, searchEndTime, minTime, maxTime);
@@ -544,7 +546,7 @@ function DateTimeSelection({
 
 		if (
 			relativeTimeFromUrl &&
-			isValidTimeFormat(relativeTimeFromUrl) &&
+			isValidShortHandDateTimeFormat(relativeTimeFromUrl) &&
 			relativeTimeFromUrl !== selectedTime
 		) {
 			handleRelativeTimeSync(relativeTimeFromUrl);
@@ -588,7 +590,7 @@ function DateTimeSelection({
 			!searchStartTime &&
 			!searchEndTime &&
 			relativeTimeFromUrl &&
-			isValidTimeFormat(relativeTimeFromUrl)
+			isValidShortHandDateTimeFormat(relativeTimeFromUrl)
 		) {
 			handleRelativeTimeSync(relativeTimeFromUrl);
 		}
@@ -660,6 +662,14 @@ function DateTimeSelection({
 		);
 	};
 
+	const minTimeForDateTimePicker = isModalTimeSelection
+		? modalStartTime * 1000000
+		: minTime;
+
+	const maxTimeForDateTimePicker = isModalTimeSelection
+		? modalEndTime * 1000000
+		: maxTime;
+
 	return (
 		<div className="date-time-selector">
 			{showResetButton && selectedTime !== defaultRelativeTime && (
@@ -692,6 +702,7 @@ function DateTimeSelection({
 					/>
 				</div>
 			)}
+
 			<Form
 				form={formSelector}
 				layout="inline"
@@ -724,12 +735,19 @@ function DateTimeSelection({
 						setCustomDTPickerVisible={setCustomDTPickerVisible}
 						onExitLiveLogs={onExitLiveLogs}
 						showRecentlyUsed={showRecentlyUsed}
+						minTime={minTimeForDateTimePicker}
+						maxTime={maxTimeForDateTimePicker}
+						isModalTimeSelection={isModalTimeSelection}
 					/>
 
 					{showAutoRefresh && selectedTime !== 'custom' && (
 						<div className="refresh-actions">
 							<FormItem hidden={refreshButtonHidden} className="refresh-btn">
-								<Button icon={<SyncOutlined />} onClick={onRefreshHandler} />
+								<Button
+									icon={<SyncOutlined />}
+									loading={!!isRefreshingQueries}
+									onClick={onRefreshHandler}
+								/>
 							</FormItem>
 
 							<FormItem>

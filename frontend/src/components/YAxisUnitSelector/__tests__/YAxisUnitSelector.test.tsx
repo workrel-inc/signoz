@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { YAxisSource } from '../types';
+import { YAxisCategoryNames } from '../constants';
+import { UniversalYAxisUnit, YAxisSource } from '../types';
 import YAxisUnitSelector from '../YAxisUnitSelector';
 
 describe('YAxisUnitSelector', () => {
@@ -90,5 +91,67 @@ describe('YAxisUnitSelector', () => {
 		// Check for some common units
 		expect(screen.getByText('Bytes (B)')).toBeInTheDocument();
 		expect(screen.getByText('Seconds (s)')).toBeInTheDocument();
+	});
+
+	it('shows warning message when incompatible unit is selected', () => {
+		render(
+			<YAxisUnitSelector
+				source={YAxisSource.ALERTS}
+				value="By"
+				onChange={mockOnChange}
+				initialValue="s"
+			/>,
+		);
+		const warningIcon = screen.getByLabelText('warning');
+		expect(warningIcon).toBeInTheDocument();
+		fireEvent.mouseOver(warningIcon);
+		return screen
+			.findByText(
+				'Unit mismatch. The metric was sent with unit Seconds (s), but Bytes (B) is selected.',
+			)
+			.then((el) => expect(el).toBeInTheDocument());
+	});
+
+	it('does not show warning message when compatible unit is selected', () => {
+		render(
+			<YAxisUnitSelector
+				source={YAxisSource.ALERTS}
+				value="s"
+				onChange={mockOnChange}
+				initialValue="s"
+			/>,
+		);
+		const warningIcon = screen.queryByLabelText('warning');
+		expect(warningIcon).not.toBeInTheDocument();
+	});
+
+	it('uses categories override to render custom units', () => {
+		const customCategories = [
+			{
+				name: YAxisCategoryNames.Data,
+				units: [
+					{
+						id: UniversalYAxisUnit.BYTES,
+						name: 'Custom Bytes (B)',
+					},
+				],
+			},
+		];
+
+		render(
+			<YAxisUnitSelector
+				value=""
+				onChange={mockOnChange}
+				source={YAxisSource.ALERTS}
+				categoriesOverride={customCategories}
+			/>,
+		);
+
+		const select = screen.getByRole('combobox');
+
+		fireEvent.mouseDown(select);
+
+		expect(screen.getByText('Custom Bytes (B)')).toBeInTheDocument();
+		expect(screen.queryByText('Bytes (B)')).not.toBeInTheDocument();
 	});
 });

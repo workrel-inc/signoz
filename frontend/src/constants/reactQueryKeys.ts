@@ -1,4 +1,11 @@
 export const REACT_QUERY_KEY = {
+	/**
+	 * For any query that should support AutoRefresh and min/max time is from DateTimeSelectionV2
+	 * You can prefix the query with this KEY, it will allow the queries to be automatically refreshed
+	 * when the user clicks in the refresh button, or alert the user when the data is being refreshed.
+	 */
+	AUTO_REFRESH_QUERY: 'AUTO_REFRESH_QUERY',
+
 	GET_PUBLIC_DASHBOARD: 'GET_PUBLIC_DASHBOARD',
 	GET_PUBLIC_DASHBOARD_META: 'GET_PUBLIC_DASHBOARD_META',
 	GET_PUBLIC_DASHBOARD_WIDGET_DATA: 'GET_PUBLIC_DASHBOARD_WIDGET_DATA',
@@ -49,12 +56,12 @@ export const REACT_QUERY_KEY = {
 
 	// Metrics Explorer Query Keys
 	GET_METRICS_LIST: 'GET_METRICS_LIST',
-	GET_METRICS_TREE_MAP: 'GET_METRICS_TREE_MAP',
 	GET_METRICS_LIST_FILTER_KEYS: 'GET_METRICS_LIST_FILTER_KEYS',
 	GET_METRICS_LIST_FILTER_VALUES: 'GET_METRICS_LIST_FILTER_VALUES',
 	GET_METRIC_DETAILS: 'GET_METRIC_DETAILS',
 	GET_RELATED_METRICS: 'GET_RELATED_METRICS',
 	GET_INSPECT_METRICS_DETAILS: 'GET_INSPECT_METRICS_DETAILS',
+	GET_METRIC_METADATA: 'GET_METRIC_METADATA',
 
 	// Traces Funnels Query Keys
 	GET_DOMAINS_LIST: 'GET_DOMAINS_LIST',
@@ -96,4 +103,7 @@ export const REACT_QUERY_KEY = {
 
 	// Span Percentiles Query Keys
 	GET_SPAN_PERCENTILES: 'GET_SPAN_PERCENTILES',
+
+	// Dashboard Grid Card Query Keys
+	DASHBOARD_GRID_CARD_QUERY_RANGE: 'DASHBOARD_GRID_CARD_QUERY_RANGE',
 } as const;

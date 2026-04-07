@@ -1,20 +1,20 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
-import './InfraMonitoringK8s.styles.scss';
-
+import { useCallback, useMemo, useState } from 'react';
 import { Button, Select } from 'antd';
 import { initialQueriesMap } from 'constants/queryBuilder';
 import QueryBuilderSearch from 'container/QueryBuilder/filters/QueryBuilderSearch';
 import DateTimeSelectionV2 from 'container/TopNav/DateTimeSelectionV2';
 import { Filter, SlidersHorizontal } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom-v5-compat';
 import { BaseAutocompleteData } from 'types/api/queryBuilder/queryAutocompleteResponse';
 import { IBuilderQuery } from 'types/api/queryBuilder/queryBuilderData';
 import { DataSource } from 'types/common/queryBuilder';
 
-import { INFRA_MONITORING_K8S_PARAMS_KEYS, K8sCategory } from './constants';
+import { K8sCategory } from './constants';
+import { useInfraMonitoringFiltersK8s } from './hooks';
 import K8sFiltersSidePanel from './K8sFiltersSidePanel/K8sFiltersSidePanel';
 import { IEntityColumn } from './utils';
+
+import './InfraMonitoringK8s.styles.scss';
 
 interface K8sHeaderProps {
 	selectedGroupBy: BaseAutocompleteData[];
@@ -50,17 +50,14 @@ function K8sHeader({
 	showAutoRefresh,
 }: K8sHeaderProps): JSX.Element {
 	const [isFiltersSidePanelOpen, setIsFiltersSidePanelOpen] = useState(false);
-	const [searchParams, setSearchParams] = useSearchParams();
+	const [urlFilters, setUrlFilters] = useInfraMonitoringFiltersK8s();
 
 	const currentQuery = initialQueriesMap[DataSource.METRICS];
 
 	const updatedCurrentQuery = useMemo(() => {
-		const urlFilters = searchParams.get(INFRA_MONITORING_K8S_PARAMS_KEYS.FILTERS);
 		let { filters } = currentQuery.builder.queryData[0];
 		if (urlFilters) {
-			const decoded = decodeURIComponent(urlFilters);
-			const parsed = JSON.parse(decoded);
-			filters = parsed;
+			filters = urlFilters;
 		}
 		return {
 			...currentQuery,
@@ -78,19 +75,16 @@ function K8sHeader({
 				],
 			},
 		};
-	}, [currentQuery, searchParams]);
+	}, [currentQuery, urlFilters]);
 
 	const query = updatedCurrentQuery?.builder?.queryData[0] || null;
 
 	const handleChangeTagFilters = useCallback(
 		(value: IBuilderQuery['filters']) => {
 			handleFiltersChange(value);
-			setSearchParams({
-				...Object.fromEntries(searchParams.entries()),
-				[INFRA_MONITORING_K8S_PARAMS_KEYS.FILTERS]: JSON.stringify(value),
-			});
+			setUrlFilters(value || null);
 		},
-		[handleFiltersChange, searchParams, setSearchParams],
+		[handleFiltersChange, setUrlFilters],
 	);
 
 	return (

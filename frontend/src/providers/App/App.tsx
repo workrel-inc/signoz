@@ -1,24 +1,33 @@
-import getLocalStorageApi from 'api/browser/localstorage/get';
-import setLocalStorageApi from 'api/browser/localstorage/set';
-import listOrgPreferences from 'api/v1/org/preferences/list';
-import get from 'api/v1/user/me/get';
-import listUserPreferences from 'api/v1/user/preferences/list';
-import getUserVersion from 'api/v1/version/get';
-import { LOCALSTORAGE } from 'constants/localStorage';
-import dayjs from 'dayjs';
-import useActiveLicenseV3 from 'hooks/useActiveLicenseV3/useActiveLicenseV3';
-import { useGetFeatureFlag } from 'hooks/useGetFeatureFlag';
-import { useGlobalEventListener } from 'hooks/useGlobalEventListener';
 import {
+	// eslint-disable-next-line no-restricted-imports
 	createContext,
 	PropsWithChildren,
 	useCallback,
+	// eslint-disable-next-line no-restricted-imports
 	useContext,
 	useEffect,
 	useMemo,
 	useState,
 } from 'react';
 import { useQuery } from 'react-query';
+import getLocalStorageApi from 'api/browser/localstorage/get';
+import setLocalStorageApi from 'api/browser/localstorage/set';
+import { useGetMyOrganization } from 'api/generated/services/orgs';
+import { useGetMyUser } from 'api/generated/services/users';
+import listOrgPreferences from 'api/v1/org/preferences/list';
+import listUserPreferences from 'api/v1/user/preferences/list';
+import getUserVersion from 'api/v1/version/get';
+import { LOCALSTORAGE } from 'constants/localStorage';
+import dayjs from 'dayjs';
+import useActiveLicenseV3 from 'hooks/useActiveLicenseV3/useActiveLicenseV3';
+import {
+	IsAdminPermission,
+	IsEditorPermission,
+	IsViewerPermission,
+} from 'hooks/useAuthZ/legacy';
+import { useAuthZ } from 'hooks/useAuthZ/useAuthZ';
+import { useGetFeatureFlag } from 'hooks/useGetFeatureFlag';
+import { useGlobalEventListener } from 'hooks/useGlobalEventListener';
 import { ChangelogSchema } from 'types/api/changelog/getChangelogByVersion';
 import { FeatureFlagProps as FeatureFlags } from 'types/api/features/getFeaturesFlags';
 import {
@@ -32,7 +41,9 @@ import {
 	UserPreference,
 } from 'types/api/preferences/preference';
 import { Organization } from 'types/api/user/getOrganization';
-import { USER_ROLES } from 'types/roles';
+import { UserResponse } from 'types/api/user/getUser';
+import { ROLES, USER_ROLES } from 'types/roles';
+import { toISOString } from 'utils/app';
 
 import { IAppContext, IUser } from './types';
 import { getUserDefaults } from './utils';
@@ -41,7 +52,7 @@ export const AppContext = createContext<IAppContext | undefined>(undefined);
 
 export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 	// on load of the provider set the user defaults with access token , refresh token from local storage
-	const [user, setUser] = useState<IUser>(() => getUserDefaults());
+	const [defaultUser, setDefaultUser] = useState<IUser>(() => getUserDefaults());
 	const [activeLicense, setActiveLicense] = useState<LicenseResModel | null>(
 		null,
 	);
@@ -63,52 +74,110 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 
 	const [showChangelogModal, setShowChangelogModal] = useState<boolean>(false);
 
-	// fetcher for user
+	// fetcher for current user
 	// user will only be fetched if the user id and token is present
 	// if logged out and trying to hit any route none of these calls will trigger
 	const {
 		data: userData,
-		isFetching: isFetchingUser,
-		error: userFetchError,
-	} = useQuery({
-		queryFn: get,
-		queryKey: ['/api/v1/user/me'],
+		isFetching: isFetchingUserData,
+		error: userFetchDataError,
+	} = useGetMyUser({
+		query: { enabled: isLoggedIn },
+	});
+
+	const {
+		data: orgData,
+		isFetching: isFetchingOrgData,
+		error: orgFetchDataError,
+	} = useGetMyOrganization({
+		query: { enabled: isLoggedIn },
+	});
+
+	const {
+		permissions: permissionsResult,
+		isFetching: isFetchingPermissions,
+		error: errorOnPermissions,
+		refetchPermissions,
+	} = useAuthZ([IsAdminPermission, IsEditorPermission, IsViewerPermission], {
 		enabled: isLoggedIn,
 	});
 
+	const isFetchingUser =
+		isFetchingUserData || isFetchingOrgData || isFetchingPermissions;
+	const userFetchError =
+		userFetchDataError || orgFetchDataError || errorOnPermissions;
+
+	const userRole = useMemo(() => {
+		if (permissionsResult?.[IsAdminPermission]?.isGranted) {
+			return USER_ROLES.ADMIN;
+		}
+		if (permissionsResult?.[IsEditorPermission]?.isGranted) {
+			return USER_ROLES.EDITOR;
+		}
+		if (permissionsResult?.[IsViewerPermission]?.isGranted) {
+			return USER_ROLES.VIEWER;
+		}
+		// if none of the permissions, so anonymous
+		return USER_ROLES.ANONYMOUS;
+	}, [permissionsResult]);
+
+	const user: IUser = useMemo(() => {
+		return {
+			...defaultUser,
+			role: userRole as ROLES,
+		};
+	}, [defaultUser, userRole]);
+
 	useEffect(() => {
-		if (!isFetchingUser && userData && userData.data) {
-			setLocalStorageApi(LOCALSTORAGE.LOGGED_IN_USER_EMAIL, userData.data.email);
-			setUser((prev) => ({
+		if (!isFetchingUserData && userData?.data) {
+			setLocalStorageApi(
+				LOCALSTORAGE.LOGGED_IN_USER_EMAIL,
+				userData.data.email ?? '',
+			);
+			setDefaultUser((prev) => ({
 				...prev,
-				...userData.data,
+				id: userData.data.id,
+				displayName: userData.data.displayName ?? prev.displayName,
+				email: userData.data.email ?? prev.email,
+				orgId: userData.data.orgId ?? prev.orgId,
+				isRoot: userData.data.isRoot,
+				status: userData.data.status as UserResponse['status'],
+				createdAt: toISOString(userData.data.createdAt) ?? prev.createdAt,
+				updatedAt: toISOString(userData.data.updatedAt) ?? prev.updatedAt,
 			}));
+		}
+	}, [userData, isFetchingUserData]);
+
+	useEffect(() => {
+		if (!isFetchingOrgData && orgData?.data) {
+			const { id: orgId, displayName: orgDisplayName } = orgData.data;
 			setOrg((prev) => {
 				if (!prev) {
-					// if no org is present enter a new entry
+					return [{ createdAt: 0, id: orgId, displayName: orgDisplayName ?? '' }];
+				}
+				const orgIndex = prev.findIndex((e) => e.id === orgId);
+
+				if (orgIndex === -1) {
 					return [
-						{
-							createdAt: 0,
-							id: userData.data.orgId,
-							displayName: userData.data.organization,
-						},
+						...prev,
+						{ createdAt: 0, id: orgId, displayName: orgDisplayName ?? '' },
 					];
 				}
-				// else mutate the existing entry
-				const orgIndex = prev.findIndex((e) => e.id === userData.data.orgId);
+
 				const updatedOrg: Organization[] = [
 					...prev.slice(0, orgIndex),
-					{
-						createdAt: 0,
-						id: userData.data.orgId,
-						displayName: userData.data.organization,
-					},
-					...prev.slice(orgIndex + 1, prev.length),
+					{ createdAt: 0, id: orgId, displayName: orgDisplayName ?? '' },
+					...prev.slice(orgIndex + 1),
 				];
 				return updatedOrg;
 			});
+
+			setDefaultUser((prev) => ({
+				...prev,
+				organization: orgDisplayName ?? prev.organization,
+			}));
 		}
-	}, [userData, isFetchingUser]);
+	}, [orgData, isFetchingOrgData]);
 
 	// fetcher for licenses v3
 	const {
@@ -201,7 +270,7 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 	}, [userPreferencesData, isFetchingUserPreferences, isLoggedIn]);
 
 	function updateUser(user: IUser): void {
-		setUser((prev) => ({
+		setDefaultUser((prev) => ({
 			...prev,
 			...user,
 		}));
@@ -232,6 +301,9 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 		(orgId: string, updatedOrgName: string): void => {
 			if (org && org.length > 0) {
 				const orgIndex = org.findIndex((e) => e.id === orgId);
+				if (orgIndex === -1) {
+					return;
+				}
 				const updatedOrg: Organization[] = [
 					...org.slice(0, orgIndex),
 					{
@@ -239,10 +311,10 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 						id: orgId,
 						displayName: updatedOrgName,
 					},
-					...org.slice(orgIndex + 1, org.length),
+					...org.slice(orgIndex + 1),
 				];
 				setOrg(updatedOrg);
-				setUser((prev) => {
+				setDefaultUser((prev) => {
 					if (prev.orgId === orgId) {
 						return {
 							...prev,
@@ -270,7 +342,7 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 	// global event listener for AFTER_LOGIN event to start the user fetch post all actions are complete
 	useGlobalEventListener('AFTER_LOGIN', (event) => {
 		if (event.detail) {
-			setUser((prev) => ({
+			setDefaultUser((prev) => ({
 				...prev,
 				accessJwt: event.detail.accessJWT,
 				refreshJwt: event.detail.refreshJWT,
@@ -278,12 +350,14 @@ export function AppProvider({ children }: PropsWithChildren): JSX.Element {
 			}));
 			setIsLoggedIn(true);
 		}
+
+		refetchPermissions();
 	});
 
 	// global event listener for LOGOUT event to clean the app context state
 	useGlobalEventListener('LOGOUT', () => {
 		setIsLoggedIn(false);
-		setUser(getUserDefaults());
+		setDefaultUser(getUserDefaults());
 		setActiveLicense(null);
 		setTrialInfo(null);
 		setFeatureFlags(null);

@@ -1,5 +1,5 @@
-import { TableProps } from 'antd';
 import { CSSProperties } from 'react';
+import { TableProps } from 'antd';
 
 export function getDefaultCellStyle(isDarkMode?: boolean): CSSProperties {
 	return {
@@ -15,13 +15,12 @@ export function getDefaultCellStyle(isDarkMode?: boolean): CSSProperties {
 		letterSpacing: '-0.07px',
 		marginBottom: '0px',
 		minWidth: '10rem',
-		width: '10rem',
+		width: 'auto',
 	};
 }
 
 export const defaultTableStyle: CSSProperties = {
 	minWidth: '40rem',
-	maxWidth: '60rem',
 };
 
 export const defaultListViewPanelStyle: CSSProperties = {

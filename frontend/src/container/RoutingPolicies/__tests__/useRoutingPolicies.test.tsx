@@ -1,4 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { QueryClient, QueryClientProvider, UseQueryResult } from 'react-query';
+import { Router } from 'react-router-dom';
 import {
 	act,
 	renderHook,
@@ -7,8 +8,6 @@ import {
 } from '@testing-library/react';
 import { GetRoutingPoliciesResponse } from 'api/routingPolicies/getRoutingPolicies';
 import { createMemoryHistory } from 'history';
-import { QueryClient, QueryClientProvider, UseQueryResult } from 'react-query';
-import { Router } from 'react-router-dom';
 import { SuccessResponseV2 } from 'types/api';
 
 import { UseRoutingPoliciesReturn } from '../types';
@@ -22,7 +21,6 @@ import {
 } from './testUtils';
 
 const mockHistoryReplace = jest.fn();
-// eslint-disable-next-line sonarjs/no-duplicate-string
 jest.mock('react-router-dom', () => ({
 	...jest.requireActual('react-router-dom'),
 	useHistory: (): any => ({

@@ -1,8 +1,8 @@
-import { Card, Flex, Table, Typography } from 'antd';
-import { ColumnsType } from 'antd/es/table';
-import { InspectMetricsSeries } from 'api/metricsExplorer/getInspectMetricsDetails';
 import { useCallback, useMemo } from 'react';
+import type { TableColumnsType as ColumnsType } from 'antd';
+import { Card, Flex, Table, Typography } from 'antd';
 
+import { InspectMetricsSeries } from './types';
 import { TableViewProps } from './types';
 import { formatTimestampToFullDateTime } from './utils';
 
@@ -11,13 +11,13 @@ function TableView({
 	setShowExpandedView,
 	setExpandedViewOptions,
 	isInspectMetricsRefetching,
-	metricInspectionOptions,
+	metricInspectionAppliedOptions,
 }: TableViewProps): JSX.Element {
 	const isSpaceAggregatedWithoutLabel = useMemo(
 		() =>
-			!!metricInspectionOptions.spaceAggregationOption &&
-			metricInspectionOptions.spaceAggregationLabels.length === 0,
-		[metricInspectionOptions],
+			!!metricInspectionAppliedOptions.spaceAggregationOption &&
+			metricInspectionAppliedOptions.spaceAggregationLabels.length === 0,
+		[metricInspectionAppliedOptions],
 	);
 	const labelKeys = useMemo(() => {
 		if (isSpaceAggregatedWithoutLabel) {

@@ -1,16 +1,15 @@
-import './Inspect.styles.scss';
-
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Sentry from '@sentry/react';
 import { Color } from '@signozhq/design-tokens';
 import { Button, Drawer, Empty, Skeleton, Typography } from 'antd';
 import logEvent from 'api/common/logEvent';
-import { useGetMetricDetails } from 'hooks/metricsExplorer/useGetMetricDetails';
+import { useGetMetricMetadata } from 'api/generated/services/metrics';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { useQueryOperations } from 'hooks/queryBuilder/useQueryBuilderOperations';
 import { useIsDarkMode } from 'hooks/useDarkMode';
 import { Compass } from 'lucide-react';
 import ErrorBoundaryFallback from 'pages/ErrorBoundaryFallback/ErrorBoundaryFallback';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DataTypes } from 'types/api/queryBuilder/queryAutocompleteResponse';
 import { IBuilderQuery } from 'types/api/queryBuilder/queryBuilderData';
 
 import { MetricsExplorerEventKeys, MetricsExplorerEvents } from '../events';
@@ -25,13 +24,20 @@ import {
 } from './types';
 import { useInspectMetrics } from './useInspectMetrics';
 
+import './Inspect.styles.scss';
+
 function Inspect({
 	metricName: defaultMetricName,
 	isOpen,
 	onClose,
 }: InspectProps): JSX.Element {
 	const isDarkMode = useIsDarkMode();
-	const [metricName, setMetricName] = useState<string | null>(defaultMetricName);
+	const [currentMetricName, setCurrentMetricName] = useState<string>(
+		defaultMetricName,
+	);
+	const [appliedMetricName, setAppliedMetricName] = useState<string>(
+		defaultMetricName,
+	);
 	const [
 		popoverOptions,
 		setPopoverOptions,
@@ -42,9 +48,14 @@ function Inspect({
 	] = useState<GraphPopoverOptions | null>(null);
 	const [showExpandedView, setShowExpandedView] = useState(false);
 
-	const { data: metricDetailsData } = useGetMetricDetails(metricName ?? '', {
-		enabled: !!metricName,
-	});
+	const { data: metricDetailsData } = useGetMetricMetadata(
+		{ metricName: appliedMetricName ?? '' },
+		{
+			query: {
+				enabled: !!appliedMetricName,
+			},
+		},
+	);
 
 	const { currentQuery } = useQueryBuilder();
 	const { handleChangeQueryData } = useQueryOperations({
@@ -84,7 +95,6 @@ function Inspect({
 
 	const {
 		inspectMetricsTimeSeries,
-		inspectMetricsStatusCode,
 		isInspectMetricsLoading,
 		isInspectMetricsError,
 		formattedInspectMetricsTimeSeries,
@@ -97,49 +107,59 @@ function Inspect({
 		aggregatedTimeSeries,
 		timeAggregatedSeriesMap,
 		reset,
-	} = useInspectMetrics(metricName);
+	} = useInspectMetrics(appliedMetricName);
 
 	const handleDispatchMetricInspectionOptions = useCallback(
 		(action: MetricInspectionAction): void => {
 			dispatchMetricInspectionOptions(action);
 			logEvent(MetricsExplorerEvents.InspectQueryChanged, {
 				[MetricsExplorerEventKeys.Modal]: 'inspect',
-				[MetricsExplorerEventKeys.Filters]: metricInspectionOptions.filters,
-				[MetricsExplorerEventKeys.TimeAggregationInterval]:
-					metricInspectionOptions.timeAggregationInterval,
-				[MetricsExplorerEventKeys.TimeAggregationOption]:
-					metricInspectionOptions.timeAggregationOption,
-				[MetricsExplorerEventKeys.SpaceAggregationOption]:
-					metricInspectionOptions.spaceAggregationOption,
-				[MetricsExplorerEventKeys.SpaceAggregationLabels]:
-					metricInspectionOptions.spaceAggregationLabels,
 			});
 		},
-		[dispatchMetricInspectionOptions, metricInspectionOptions],
+		[dispatchMetricInspectionOptions],
 	);
 
-	const selectedMetricType = useMemo(
-		() => metricDetailsData?.payload?.data?.metadata?.metric_type,
-		[metricDetailsData],
+	const selectedMetricType = useMemo(() => metricDetailsData?.data?.type, [
+		metricDetailsData,
+	]);
+
+	const selectedMetricUnit = useMemo(() => metricDetailsData?.data?.unit, [
+		metricDetailsData,
+	]);
+
+	const aggregateAttribute = useMemo(
+		() => ({
+			key: currentMetricName ?? '',
+			dataType: DataTypes.String,
+			type: selectedMetricType as string,
+			isColumn: true,
+			isJSON: false,
+			id: `${currentMetricName}--${DataTypes.String}--${selectedMetricType}--true`,
+		}),
+		[currentMetricName, selectedMetricType],
 	);
 
-	const selectedMetricUnit = useMemo(
-		() => metricDetailsData?.payload?.data?.metadata?.unit,
-		[metricDetailsData],
-	);
+	const [currentQueryData, setCurrentQueryData] = useState<IBuilderQuery>({
+		...searchQuery,
+		aggregateAttribute,
+	});
+
+	useEffect(() => {
+		if (searchQuery) {
+			setCurrentQueryData({
+				...searchQuery,
+				aggregateAttribute,
+			});
+		}
+	}, [aggregateAttribute, searchQuery]);
 
 	const resetInspection = useCallback(() => {
 		setShowExpandedView(false);
 		setPopoverOptions(null);
 		setExpandedViewOptions(null);
+		setCurrentQueryData(searchQuery as IBuilderQuery);
 		reset();
-	}, [reset]);
-
-	// Reset inspection when the selected metric changes
-	useEffect(() => {
-		resetInspection();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [metricName]);
+	}, [reset, searchQuery]);
 
 	// Hide expanded view whenever inspection step changes
 	useEffect(() => {
@@ -159,11 +179,8 @@ function Inspect({
 			);
 		}
 
-		if (isInspectMetricsError || inspectMetricsStatusCode !== 200) {
-			const errorMessage =
-				inspectMetricsStatusCode === 400
-					? 'The time range is too large. Please modify it to be within 30 minutes.'
-					: 'Error loading inspect metrics.';
+		if (isInspectMetricsError) {
+			const errorMessage = 'Error loading inspect metrics.';
 
 			return (
 				<div
@@ -193,7 +210,7 @@ function Inspect({
 						inspectMetricsTimeSeries={aggregatedTimeSeries}
 						formattedInspectMetricsTimeSeries={formattedInspectMetricsTimeSeries}
 						resetInspection={resetInspection}
-						metricName={metricName}
+						metricName={appliedMetricName}
 						metricUnit={selectedMetricUnit}
 						metricType={selectedMetricType}
 						spaceAggregationSeriesMap={spaceAggregationSeriesMap}
@@ -203,19 +220,20 @@ function Inspect({
 						showExpandedView={showExpandedView}
 						setExpandedViewOptions={setExpandedViewOptions}
 						popoverOptions={popoverOptions}
-						metricInspectionOptions={metricInspectionOptions}
+						metricInspectionAppliedOptions={metricInspectionOptions.appliedOptions}
 						isInspectMetricsRefetching={isInspectMetricsRefetching}
 					/>
 					<QueryBuilder
-						metricName={metricName}
-						metricType={selectedMetricType}
-						setMetricName={setMetricName}
+						currentMetricName={currentMetricName}
+						setCurrentMetricName={setCurrentMetricName}
+						setAppliedMetricName={setAppliedMetricName}
 						spaceAggregationLabels={spaceAggregationLabels}
-						metricInspectionOptions={metricInspectionOptions}
+						currentMetricInspectionOptions={metricInspectionOptions.currentOptions}
 						dispatchMetricInspectionOptions={handleDispatchMetricInspectionOptions}
 						inspectionStep={inspectionStep}
 						inspectMetricsTimeSeries={inspectMetricsTimeSeries}
-						searchQuery={searchQuery as IBuilderQuery}
+						currentQuery={currentQueryData}
+						setCurrentQuery={setCurrentQueryData}
 					/>
 				</div>
 				<div className="inspect-metrics-content-second-col">
@@ -228,7 +246,7 @@ function Inspect({
 							options={expandedViewOptions}
 							spaceAggregationSeriesMap={spaceAggregationSeriesMap}
 							step={inspectionStep}
-							metricInspectionOptions={metricInspectionOptions}
+							metricInspectionAppliedOptions={metricInspectionOptions.appliedOptions}
 							timeAggregatedSeriesMap={timeAggregatedSeriesMap}
 						/>
 					)}
@@ -239,22 +257,25 @@ function Inspect({
 		isInspectMetricsLoading,
 		isInspectMetricsRefetching,
 		isInspectMetricsError,
-		inspectMetricsStatusCode,
 		inspectMetricsTimeSeries,
 		aggregatedTimeSeries,
 		formattedInspectMetricsTimeSeries,
 		resetInspection,
-		metricName,
+		appliedMetricName,
 		selectedMetricUnit,
 		selectedMetricType,
 		spaceAggregationSeriesMap,
 		inspectionStep,
 		showExpandedView,
 		popoverOptions,
-		metricInspectionOptions,
+		metricInspectionOptions.appliedOptions,
+		metricInspectionOptions.currentOptions,
+		currentMetricName,
+		setCurrentMetricName,
+		setAppliedMetricName,
 		spaceAggregationLabels,
 		handleDispatchMetricInspectionOptions,
-		searchQuery,
+		currentQueryData,
 		expandedViewOptions,
 		timeAggregatedSeriesMap,
 	]);

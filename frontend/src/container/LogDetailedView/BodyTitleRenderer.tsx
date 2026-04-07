@@ -1,3 +1,5 @@
+import { useCallback } from 'react';
+import { useCopyToClipboard } from 'react-use';
 import { orange } from '@ant-design/colors';
 import { SettingOutlined } from '@ant-design/icons';
 import { Dropdown, MenuProps } from 'antd';
@@ -8,8 +10,6 @@ import {
 } from 'constants/antlrQueryConstants';
 import { useActiveLog } from 'hooks/logs/useActiveLog';
 import { useNotifications } from 'hooks/useNotifications';
-import { useCallback } from 'react';
-import { useCopyToClipboard } from 'react-use';
 
 import { TitleWrapper } from './BodyTitleRenderer.styles';
 import { DROPDOWN_KEY } from './constant';
@@ -92,14 +92,14 @@ function BodyTitleRenderer({
 
 			if (isObject) {
 				// For objects/arrays, stringify the entire structure
-				copyText = `"${cleanedKey}": ${JSON.stringify(value, null, 2)}`;
+				copyText = JSON.stringify(value, null, 2);
 			} else if (parentIsArray) {
-				// For array elements, copy just the value
-				copyText = `"${cleanedKey}": ${value}`;
+				// array elements
+				copyText = `${value}`;
 			} else {
-				// For primitive values, format as JSON key-value pair
-				const valueStr = typeof value === 'string' ? `"${value}"` : String(value);
-				copyText = `"${cleanedKey}": ${valueStr}`;
+				// primitive values
+				const valueStr = typeof value === 'string' ? value : String(value);
+				copyText = valueStr;
 			}
 
 			setCopy(copyText);
@@ -121,9 +121,23 @@ function BodyTitleRenderer({
 	return (
 		<TitleWrapper onClick={handleNodeClick}>
 			{typeof value !== 'object' && (
-				<Dropdown menu={menu} trigger={['click']}>
-					<SettingOutlined style={{ marginRight: 8 }} className="hover-reveal" />
-				</Dropdown>
+				<span
+					onClick={(e): void => {
+						e.stopPropagation();
+						e.preventDefault();
+					}}
+					onMouseDown={(e): void => e.preventDefault()}
+				>
+					<Dropdown
+						menu={menu}
+						trigger={['click']}
+						dropdownRender={(originNode): React.ReactNode => (
+							<div data-log-detail-ignore="true">{originNode}</div>
+						)}
+					>
+						<SettingOutlined style={{ marginRight: 8 }} className="hover-reveal" />
+					</Dropdown>
+				</span>
 			)}
 			{title.toString()}{' '}
 			{!parentIsArray && typeof value !== 'object' && (

@@ -1,8 +1,8 @@
 package implmetricsexplorer
 
 import (
+	"context"
 	"net/http"
-	"strings"
 
 	"github.com/SigNoz/signoz/pkg/errors"
 	"github.com/SigNoz/signoz/pkg/http/binding"
@@ -14,6 +14,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
+func extractMetricName(req *http.Request) (string, error) {
+	metricName := mux.Vars(req)["metric_name"]
+	if metricName == "" {
+		return "", errors.NewInvalidInputf(errors.CodeInvalidInput, "metric_name is required in URL path")
+	}
+	return metricName, nil
+}
+
 type handler struct {
 	module metricsexplorer.Module
 }
@@ -23,6 +31,34 @@ func NewHandler(m metricsexplorer.Module) metricsexplorer.Handler {
 	return &handler{
 		module: m,
 	}
+}
+
+func (h *handler) ListMetrics(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	var params metricsexplorertypes.ListMetricsParams
+	if err := binding.Query.BindQuery(req.URL.Query(), &params); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	if err := params.Validate(); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+	out, err := h.module.ListMetrics(req.Context(), orgID, &params)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	render.Success(rw, http.StatusOK, out)
 }
 
 func (h *handler) GetStats(rw http.ResponseWriter, req *http.Request) {
@@ -83,6 +119,7 @@ func (h *handler) UpdateMetricMetadata(rw http.ResponseWriter, req *http.Request
 	// Extract metric_name from URL path
 	vars := mux.Vars(req)
 	metricName := vars["metric_name"]
+
 	if metricName == "" {
 		render.Error(rw, errors.NewInvalidInputf(errors.CodeInvalidInput, "metric_name is required in URL path"))
 		return
@@ -96,7 +133,6 @@ func (h *handler) UpdateMetricMetadata(rw http.ResponseWriter, req *http.Request
 
 	// Set metric name from URL path
 	in.MetricName = metricName
-
 	orgID := valuer.MustNewUUID(claims.OrgID)
 
 	err = h.module.UpdateMetricMetadata(req.Context(), orgID, &in)
@@ -115,9 +151,9 @@ func (h *handler) GetMetricMetadata(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	metricName := strings.TrimSpace(req.URL.Query().Get("metricName"))
-	if metricName == "" {
-		render.Error(rw, errors.NewInvalidInputf(errors.CodeInvalidInput, "metricName query parameter is required"))
+	metricName, err := extractMetricName(req)
+	if err != nil {
+		render.Error(rw, err)
 		return
 	}
 
@@ -136,4 +172,176 @@ func (h *handler) GetMetricMetadata(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	render.Success(rw, http.StatusOK, metadata)
+}
+
+func (h *handler) GetMetricAlerts(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	metricName, err := extractMetricName(req)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+
+	if err := h.checkMetricExists(req.Context(), orgID, metricName); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	out, err := h.module.GetMetricAlerts(req.Context(), orgID, metricName)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+	render.Success(rw, http.StatusOK, out)
+}
+
+func (h *handler) GetMetricDashboards(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	metricName, err := extractMetricName(req)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+
+	if err := h.checkMetricExists(req.Context(), orgID, metricName); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	out, err := h.module.GetMetricDashboards(req.Context(), orgID, metricName)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+	render.Success(rw, http.StatusOK, out)
+}
+
+func (h *handler) GetMetricHighlights(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	metricName, err := extractMetricName(req)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+
+	if err := h.checkMetricExists(req.Context(), orgID, metricName); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	highlights, err := h.module.GetMetricHighlights(req.Context(), orgID, metricName)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+	render.Success(rw, http.StatusOK, highlights)
+}
+
+func (h *handler) GetMetricAttributes(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	metricName, err := extractMetricName(req)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	var in metricsexplorertypes.MetricAttributesRequest
+	if err := binding.Query.BindQuery(req.URL.Query(), &in); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	in.MetricName = metricName
+
+	if err := in.Validate(); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+
+	if err := h.checkMetricExists(req.Context(), orgID, metricName); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	out, err := h.module.GetMetricAttributes(req.Context(), orgID, &in)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	render.Success(rw, http.StatusOK, out)
+}
+
+func (h *handler) InspectMetrics(rw http.ResponseWriter, req *http.Request) {
+	claims, err := authtypes.ClaimsFromContext(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	var in metricsexplorertypes.InspectMetricsRequest
+	if err := binding.JSON.BindBody(req.Body, &in); err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	orgID := valuer.MustNewUUID(claims.OrgID)
+	out, err := h.module.InspectMetrics(req.Context(), orgID, &in)
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	render.Success(rw, http.StatusOK, out)
+}
+
+func (h *handler) GetOnboardingStatus(rw http.ResponseWriter, req *http.Request) {
+	hasMetrics, err := h.module.HasNonSigNozMetrics(req.Context())
+	if err != nil {
+		render.Error(rw, err)
+		return
+	}
+
+	render.Success(rw, http.StatusOK, &metricsexplorertypes.MetricsOnboardingResponse{
+		HasMetrics: hasMetrics,
+	})
+}
+
+func (h *handler) checkMetricExists(ctx context.Context, orgID valuer.UUID, metricName string) error {
+	exists, err := h.module.CheckMetricExists(ctx, orgID, metricName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.NewNotFoundf(errors.CodeNotFound, "metric not found: %q", metricName)
+	}
+	return nil
 }

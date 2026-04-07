@@ -1,11 +1,3 @@
-import { Space } from 'antd';
-import ErrorInPlace from 'components/ErrorInPlace/ErrorInPlace';
-import { ENTITY_VERSION_V5 } from 'constants/app';
-import { initialQueriesMap, PANEL_TYPES } from 'constants/queryBuilder';
-import { REACT_QUERY_KEY } from 'constants/reactQueryKeys';
-import { QueryTable } from 'container/QueryTable';
-import { useGetQueryRange } from 'hooks/queryBuilder/useGetQueryRange';
-import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import {
 	Dispatch,
 	memo,
@@ -14,7 +6,16 @@ import {
 	useEffect,
 	useMemo,
 } from 'react';
+// eslint-disable-next-line no-restricted-imports
 import { useSelector } from 'react-redux';
+import { Space } from 'antd';
+import ErrorInPlace from 'components/ErrorInPlace/ErrorInPlace';
+import { ENTITY_VERSION_V5 } from 'constants/app';
+import { initialQueriesMap, PANEL_TYPES } from 'constants/queryBuilder';
+import { REACT_QUERY_KEY } from 'constants/reactQueryKeys';
+import { QueryTable } from 'container/QueryTable';
+import { useGetQueryRange } from 'hooks/queryBuilder/useGetQueryRange';
+import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { AppState } from 'store/reducers';
 import { Warning } from 'types/api';
 import APIError from 'types/api/error';
@@ -49,7 +50,6 @@ function TableView({
 	);
 
 	if (queryKeyRef) {
-		// eslint-disable-next-line no-param-reassign
 		queryKeyRef.current = queryKey;
 	}
 

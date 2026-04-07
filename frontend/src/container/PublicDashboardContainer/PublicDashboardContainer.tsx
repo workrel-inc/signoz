@@ -1,25 +1,26 @@
-import './PublicDashboardContainer.styles.scss';
-
+import { useMemo, useState } from 'react';
+import RGL, { WidthProvider } from 'react-grid-layout';
 import { Typography } from 'antd';
 import cx from 'classnames';
 import { PANEL_GROUP_TYPES, PANEL_TYPES } from 'constants/queryBuilder';
 import { themeColors } from 'constants/theme';
 import { Card, CardContainer } from 'container/GridCardLayout/styles';
 import DateTimeSelectionV2 from 'container/TopNav/DateTimeSelectionV2';
+import { DEFAULT_TIME_RANGE } from 'container/TopNav/DateTimeSelectionV2/constants';
 import {
 	CustomTimeType,
 	Time,
-} from 'container/TopNav/DateTimeSelectionV2/config';
+} from 'container/TopNav/DateTimeSelectionV2/types';
 import dayjs from 'dayjs';
 import { useIsDarkMode } from 'hooks/useDarkMode';
 import GetMinMax from 'lib/getMinMax';
-import { useMemo, useState } from 'react';
-import RGL, { WidthProvider } from 'react-grid-layout';
 import { SuccessResponseV2 } from 'types/api';
 import { Widgets } from 'types/api/dashboard/getAll';
 import { PublicDashboardDataProps } from 'types/api/dashboard/public/get';
 
 import Panel from './Panel';
+
+import './PublicDashboardContainer.styles.scss';
 
 const ReactGridLayoutComponent = WidthProvider(RGL);
 
@@ -80,7 +81,7 @@ function PublicDashboardContainer({
 	const { widgets } = dashboard?.data || {};
 
 	const [selectedTimeRangeLabel, setSelectedTimeRangeLabel] = useState<string>(
-		publicDashboard?.defaultTimeRange || '30m',
+		publicDashboard?.defaultTimeRange || DEFAULT_TIME_RANGE,
 	);
 
 	const [selectedTimeRange, setSelectedTimeRange] = useState<{
@@ -88,7 +89,7 @@ function PublicDashboardContainer({
 		endTime: number;
 	}>(
 		getStartTimeAndEndTimeFromTimeRange(
-			publicDashboard?.defaultTimeRange || '30m',
+			publicDashboard?.defaultTimeRange || DEFAULT_TIME_RANGE,
 		),
 	);
 
@@ -158,6 +159,8 @@ function PublicDashboardContainer({
 								modalSelectedInterval={selectedTimeRangeLabel as Time}
 								disableUrlSync
 								showRecentlyUsed={false}
+								modalInitialStartTime={selectedTimeRange.startTime * 1000}
+								modalInitialEndTime={selectedTimeRange.endTime * 1000}
 							/>
 						</div>
 					</div>

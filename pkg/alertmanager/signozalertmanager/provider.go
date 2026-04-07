@@ -2,9 +2,11 @@ package signozalertmanager
 
 import (
 	"context"
-	"github.com/SigNoz/signoz/pkg/query-service/utils/labels"
-	"github.com/prometheus/common/model"
 	"time"
+
+	"github.com/prometheus/common/model"
+
+	"github.com/SigNoz/signoz/pkg/query-service/utils/labels"
 
 	amConfig "github.com/prometheus/alertmanager/config"
 
@@ -65,7 +67,7 @@ func New(ctx context.Context, providerSettings factory.ProviderSettings, config 
 
 func (provider *provider) Start(ctx context.Context) error {
 	if err := provider.service.SyncServers(ctx); err != nil {
-		provider.settings.Logger().ErrorContext(ctx, "failed to sync alertmanager servers", "error", err)
+		provider.settings.Logger().ErrorContext(ctx, "failed to sync alertmanager servers", errors.Attr(err))
 		return err
 	}
 
@@ -77,7 +79,7 @@ func (provider *provider) Start(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := provider.service.SyncServers(ctx); err != nil {
-				provider.settings.Logger().ErrorContext(ctx, "failed to sync alertmanager servers", "error", err)
+				provider.settings.Logger().ErrorContext(ctx, "failed to sync alertmanager servers", errors.Attr(err))
 			}
 		}
 	}
@@ -167,6 +169,21 @@ func (provider *provider) DeleteChannelByID(ctx context.Context, orgID string, c
 		return err
 	}
 
+	// Check if channel is referenced by any route policy (rule-based or policy-based)
+	policies, err := provider.notificationManager.GetRoutePoliciesByChannel(ctx, orgID, channel.Name)
+	if err != nil {
+		return err
+	}
+	if len(policies) > 0 {
+		names := make([]string, 0, len(policies))
+		for _, p := range policies {
+			names = append(names, p.Name)
+		}
+		return errors.NewInvalidInputf(errors.CodeInvalidInput,
+			"channel %q cannot be deleted because it is used by the following routing policies: %v",
+			channel.Name, names)
+	}
+
 	config, err := provider.configStore.Get(ctx, orgID)
 	if err != nil {
 		return err
@@ -181,20 +198,29 @@ func (provider *provider) DeleteChannelByID(ctx context.Context, orgID string, c
 	}))
 }
 
-func (provider *provider) CreateChannel(ctx context.Context, orgID string, receiver alertmanagertypes.Receiver) error {
+func (provider *provider) CreateChannel(ctx context.Context, orgID string, receiver alertmanagertypes.Receiver) (*alertmanagertypes.Channel, error) {
 	config, err := provider.configStore.Get(ctx, orgID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := config.CreateReceiver(receiver); err != nil {
-		return err
+		return nil, err
 	}
 
-	channel := alertmanagertypes.NewChannelFromReceiver(receiver, orgID)
-	return provider.configStore.CreateChannel(ctx, channel, alertmanagertypes.WithCb(func(ctx context.Context) error {
+	channel, err := alertmanagertypes.NewChannelFromReceiver(receiver, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	err = provider.configStore.CreateChannel(ctx, channel, alertmanagertypes.WithCb(func(ctx context.Context) error {
 		return provider.configStore.Set(ctx, config)
 	}))
+	if err != nil {
+		return nil, err
+	}
+
+	return channel, nil
 }
 
 func (provider *provider) SetConfig(ctx context.Context, config *alertmanagertypes.Config) error {
@@ -206,7 +232,7 @@ func (provider *provider) GetConfig(ctx context.Context, orgID string) (*alertma
 }
 
 func (provider *provider) SetDefaultConfig(ctx context.Context, orgID string) error {
-	config, err := alertmanagertypes.NewDefaultConfig(provider.config.Signoz.Config.Global, provider.config.Signoz.Config.Route, orgID)
+	config, err := alertmanagertypes.NewDefaultConfig(provider.config.Signoz.Global, provider.config.Signoz.Route, orgID)
 	if err != nil {
 		return err
 	}

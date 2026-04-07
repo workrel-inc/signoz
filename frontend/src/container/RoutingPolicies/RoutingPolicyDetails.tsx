@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
 	Button,
 	Divider,
@@ -8,12 +9,10 @@ import {
 	Select,
 	Typography,
 } from 'antd';
-import { useForm } from 'antd/lib/form/Form';
 import ROUTES from 'constants/routes';
 import { ModalTitle } from 'container/PipelinePage/PipelineListsView/styles';
 import { Check, Loader, X } from 'lucide-react';
 import { useAppContext } from 'providers/App/App';
-import { useMemo } from 'react';
 import { USER_ROLES } from 'types/roles';
 
 import { INITIAL_ROUTING_POLICY_DETAILS_FORM_STATE } from './constants';
@@ -33,7 +32,7 @@ function RoutingPolicyDetails({
 	isPolicyDetailsModalActionLoading,
 	refreshChannels,
 }: RoutingPolicyDetailsProps): JSX.Element {
-	const [form] = useForm();
+	const [form] = Form.useForm();
 	const { user } = useAppContext();
 
 	const initialFormState = useMemo(() => {

@@ -1,5 +1,5 @@
-import { Button, Flex, Switch, Typography } from 'antd';
-import { BaseOptionType, DefaultOptionType, SelectProps } from 'antd/es/select';
+import { Button, Flex, SelectProps, Switch, Typography } from 'antd';
+import type { BaseOptionType, DefaultOptionType } from 'antd/es/select';
 import { getInvolvedQueriesInTraceOperator } from 'components/QueryBuilderV2/QueryV2/TraceOperator/utils/utils';
 import { YAxisSource } from 'components/YAxisUnitSelector/types';
 import { getYAxisCategories } from 'components/YAxisUnitSelector/utils';
@@ -47,9 +47,17 @@ export function getCategoryByOptionId(id: string): string | undefined {
 }
 
 export function getCategorySelectOptionByName(
-	name: string,
+	name: string | undefined,
 ): DefaultOptionType[] {
+	if (!name) {
+		return [];
+	}
+
 	const categories = getYAxisCategories(YAxisSource.ALERTS);
+	if (!categories.length) {
+		return [];
+	}
+
 	return (
 		categories
 			.find((category) => category.name === name)

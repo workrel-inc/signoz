@@ -1,18 +1,17 @@
-/* eslint-disable no-restricted-syntax */
-/* eslint-disable @typescript-eslint/explicit-function-return-type */
-import '../InfraMonitoringK8s.styles.scss';
-import './K8sClustersList.styles.scss';
-
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+// eslint-disable-next-line no-restricted-imports
+import { useSelector } from 'react-redux';
 import { LoadingOutlined } from '@ant-design/icons';
 import {
 	Button,
 	Spin,
 	Table,
+	TableColumnType as ColumnType,
 	TablePaginationConfig,
 	TableProps,
 	Typography,
 } from 'antd';
-import { ColumnType, SorterResult } from 'antd/es/table/interface';
+import type { SorterResult } from 'antd/es/table/interface';
 import logEvent from 'api/common/logEvent';
 import { K8sClustersListPayload } from 'api/infraMonitoring/getK8sClustersList';
 import { InfraMonitoringEvents } from 'constants/events';
@@ -21,21 +20,25 @@ import { useGetAggregateKeys } from 'hooks/queryBuilder/useGetAggregateKeys';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { useQueryOperations } from 'hooks/queryBuilder/useQueryBuilderOperations';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSelector } from 'react-redux';
-import { useSearchParams } from 'react-router-dom-v5-compat';
 import { AppState } from 'store/reducers';
 import { IBuilderQuery } from 'types/api/queryBuilder/queryBuilderData';
 import { GlobalReducer } from 'types/reducer/globalTime';
+import { buildAbsolutePath, isModifierKeyPressed } from 'utils/app';
+import { openInNewTab } from 'utils/navigation';
 
 import { FeatureKeys } from '../../../constants/features';
 import { useAppContext } from '../../../providers/App/App';
-import { getOrderByFromParams } from '../commonUtils';
 import {
 	GetK8sEntityToAggregateAttribute,
 	INFRA_MONITORING_K8S_PARAMS_KEYS,
 	K8sCategory,
 } from '../constants';
+import {
+	useInfraMonitoringClusterName,
+	useInfraMonitoringCurrentPage,
+	useInfraMonitoringGroupBy,
+	useInfraMonitoringOrderBy,
+} from '../hooks';
 import K8sHeader from '../K8sHeader';
 import LoadingContainer from '../LoadingContainer';
 import { usePageSize } from '../utils';
@@ -47,7 +50,10 @@ import {
 	getK8sClustersListQuery,
 	K8sClustersRowData,
 } from './utils';
-// eslint-disable-next-line sonarjs/cognitive-complexity
+
+import '../InfraMonitoringK8s.styles.scss';
+import './K8sClustersList.styles.scss';
+
 function K8sClustersList({
 	isFiltersVisible,
 	handleFilterVisibilityChange,
@@ -61,54 +67,18 @@ function K8sClustersList({
 		(state) => state.globalTime,
 	);
 
-	const [searchParams, setSearchParams] = useSearchParams();
+	const [currentPage, setCurrentPage] = useInfraMonitoringCurrentPage();
+	const [groupBy, setGroupBy] = useInfraMonitoringGroupBy();
+	const [orderBy, setOrderBy] = useInfraMonitoringOrderBy();
+	const [
+		selectedClusterName,
+		setselectedClusterName,
+	] = useInfraMonitoringClusterName();
 
-	const [currentPage, setCurrentPage] = useState(() => {
-		const page = searchParams.get(INFRA_MONITORING_K8S_PARAMS_KEYS.CURRENT_PAGE);
-		if (page) {
-			return parseInt(page, 10);
-		}
-		return 1;
-	});
 	const [filtersInitialised, setFiltersInitialised] = useState(false);
 	const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
 
-	useEffect(() => {
-		setSearchParams({
-			...Object.fromEntries(searchParams.entries()),
-			[INFRA_MONITORING_K8S_PARAMS_KEYS.CURRENT_PAGE]: currentPage.toString(),
-		});
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [currentPage]);
-
-	const [orderBy, setOrderBy] = useState<{
-		columnName: string;
-		order: 'asc' | 'desc';
-	} | null>(() => getOrderByFromParams(searchParams, false));
-
-	const [selectedClusterName, setselectedClusterName] = useState<string | null>(
-		() => {
-			const clusterName = searchParams.get(
-				INFRA_MONITORING_K8S_PARAMS_KEYS.CLUSTER_NAME,
-			);
-			if (clusterName) {
-				return clusterName;
-			}
-			return null;
-		},
-	);
-
 	const { pageSize, setPageSize } = usePageSize(K8sCategory.CLUSTERS);
-
-	const [groupBy, setGroupBy] = useState<IBuilderQuery['groupBy']>(() => {
-		const groupBy = searchParams.get(INFRA_MONITORING_K8S_PARAMS_KEYS.GROUP_BY);
-		if (groupBy) {
-			const decoded = decodeURIComponent(groupBy);
-			const parsed = JSON.parse(decoded);
-			return parsed as IBuilderQuery['groupBy'];
-		}
-		return [];
-	});
 
 	const [
 		selectedRowData,
@@ -135,7 +105,7 @@ function K8sClustersList({
 		if (quickFiltersLastUpdated !== -1) {
 			setCurrentPage(1);
 		}
-	}, [quickFiltersLastUpdated]);
+	}, [quickFiltersLastUpdated, setCurrentPage]);
 
 	const { featureFlags } = useAppContext();
 	const dotMetricsEnabled =
@@ -151,7 +121,9 @@ function K8sClustersList({
 			op: 'and',
 		};
 
-		if (!selectedRowData) return baseFilters;
+		if (!selectedRowData) {
+			return baseFilters;
+		}
 
 		const { groupedByMeta } = selectedRowData;
 
@@ -171,7 +143,9 @@ function K8sClustersList({
 	};
 
 	const fetchGroupedByRowDataQuery = useMemo(() => {
-		if (!selectedRowData) return null;
+		if (!selectedRowData) {
+			return null;
+		}
 
 		const baseQuery = getK8sClustersListQuery();
 
@@ -184,25 +158,28 @@ function K8sClustersList({
 			filters,
 			start: Math.floor(minTime / 1000000),
 			end: Math.floor(maxTime / 1000000),
-			orderBy,
+			orderBy: orderBy || baseQuery.orderBy,
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [minTime, maxTime, orderBy, selectedRowData, groupBy]);
 
 	const groupedByRowDataQueryKey = useMemo(() => {
+		// be careful with what you serialize from selectedRowData
+		// since it's react node, it could contain circular references
+		const selectedRowDataKey = JSON.stringify(selectedRowData?.groupedByMeta);
 		if (selectedClusterName) {
 			return [
 				'clusterList',
 				JSON.stringify(queryFilters),
 				JSON.stringify(orderBy),
-				JSON.stringify(selectedRowData),
+				selectedRowDataKey,
 			];
 		}
 		return [
 			'clusterList',
 			JSON.stringify(queryFilters),
 			JSON.stringify(orderBy),
-			JSON.stringify(selectedRowData),
+			selectedRowDataKey,
 			String(minTime),
 			String(maxTime),
 		];
@@ -261,7 +238,7 @@ function K8sClustersList({
 			filters: queryFilters,
 			start: Math.floor(minTime / 1000000),
 			end: Math.floor(maxTime / 1000000),
-			orderBy,
+			orderBy: orderBy || baseQuery.orderBy,
 		};
 		if (groupBy.length > 0) {
 			queryPayload.groupBy = groupBy;
@@ -276,7 +253,9 @@ function K8sClustersList({
 	);
 
 	const nestedClustersData = useMemo(() => {
-		if (!selectedRowData || !groupedByRowData?.payload?.data.records) return [];
+		if (!selectedRowData || !groupedByRowData?.payload?.data.records) {
+			return [];
+		}
 		return groupedByRowData?.payload?.data?.records || [];
 	}, [groupedByRowData, selectedRowData]);
 
@@ -367,26 +346,15 @@ function K8sClustersList({
 			}
 
 			if ('field' in sorter && sorter.order) {
-				const currentOrderBy = {
+				setOrderBy({
 					columnName: sorter.field as string,
 					order: (sorter.order === 'ascend' ? 'asc' : 'desc') as 'asc' | 'desc',
-				};
-				setOrderBy(currentOrderBy);
-				setSearchParams({
-					...Object.fromEntries(searchParams.entries()),
-					[INFRA_MONITORING_K8S_PARAMS_KEYS.ORDER_BY]: JSON.stringify(
-						currentOrderBy,
-					),
 				});
 			} else {
 				setOrderBy(null);
-				setSearchParams({
-					...Object.fromEntries(searchParams.entries()),
-					[INFRA_MONITORING_K8S_PARAMS_KEYS.ORDER_BY]: JSON.stringify(null),
-				});
 			}
 		},
-		[searchParams, setSearchParams],
+		[setCurrentPage, setOrderBy],
 	);
 
 	const { handleChangeQueryData } = useQueryOperations({
@@ -426,7 +394,9 @@ function K8sClustersList({
 	}, [data?.payload?.data?.total]);
 
 	const selectedClusterData = useMemo(() => {
-		if (!selectedClusterName) return null;
+		if (!selectedClusterName) {
+			return null;
+		}
 		if (groupBy.length > 0) {
 			// If grouped by, return the cluster from the formatted grouped by clusters data
 			return (
@@ -443,14 +413,31 @@ function K8sClustersList({
 		);
 	}, [selectedClusterName, groupBy.length, clustersData, nestedClustersData]);
 
-	const handleRowClick = (record: K8sClustersRowData): void => {
+	const openClusterInNewTab = (record: K8sClustersRowData): void => {
+		const newParams = new URLSearchParams(document.location.search);
+		newParams.set(
+			INFRA_MONITORING_K8S_PARAMS_KEYS.CLUSTER_NAME,
+			record.clusterUID,
+		);
+		openInNewTab(
+			buildAbsolutePath({
+				relativePath: '',
+				urlQueryString: newParams.toString(),
+			}),
+		);
+	};
+
+	const handleRowClick = (
+		record: K8sClustersRowData,
+		event: React.MouseEvent,
+	): void => {
+		if (event && isModifierKeyPressed(event)) {
+			openClusterInNewTab(record);
+			return;
+		}
 		if (groupBy.length === 0) {
 			setSelectedRowData(null);
 			setselectedClusterName(record.clusterUID);
-			setSearchParams({
-				...Object.fromEntries(searchParams.entries()),
-				[INFRA_MONITORING_K8S_PARAMS_KEYS.CLUSTER_NAME]: record.clusterUID,
-			});
 		} else {
 			handleGroupByRowClick(record);
 		}
@@ -467,7 +454,9 @@ function K8sClustersList({
 	const isGroupedByAttribute = groupBy.length > 0;
 
 	const handleExpandedRowViewAllClick = (): void => {
-		if (!selectedRowData) return;
+		if (!selectedRowData) {
+			return;
+		}
 
 		const filters = createFiltersForSelectedRowData(selectedRowData, groupBy);
 
@@ -477,11 +466,6 @@ function K8sClustersList({
 		setSelectedRowData(null);
 		setGroupBy([]);
 		setOrderBy(null);
-		setSearchParams({
-			...Object.fromEntries(searchParams.entries()),
-			[INFRA_MONITORING_K8S_PARAMS_KEYS.GROUP_BY]: JSON.stringify([]),
-			[INFRA_MONITORING_K8S_PARAMS_KEYS.ORDER_BY]: JSON.stringify(null),
-		});
 	};
 
 	const expandedRowRender = (): JSX.Element => (
@@ -505,8 +489,14 @@ function K8sClustersList({
 							indicator: <Spin indicator={<LoadingOutlined size={14} spin />} />,
 						}}
 						showHeader={false}
-						onRow={(record): { onClick: () => void; className: string } => ({
-							onClick: (): void => {
+						onRow={(
+							record,
+						): { onClick: (event: React.MouseEvent) => void; className: string } => ({
+							onClick: (event: React.MouseEvent): void => {
+								if (event && isModifierKeyPressed(event)) {
+									openClusterInNewTab(record);
+									return;
+								}
 								setselectedClusterName(record.clusterUID);
 							},
 							className: 'expanded-clickable-row',
@@ -572,25 +562,11 @@ function K8sClustersList({
 
 	const handleCloseClusterDetail = (): void => {
 		setselectedClusterName(null);
-		setSearchParams({
-			...Object.fromEntries(
-				Array.from(searchParams.entries()).filter(
-					([key]) =>
-						![
-							INFRA_MONITORING_K8S_PARAMS_KEYS.CLUSTER_NAME,
-							INFRA_MONITORING_K8S_PARAMS_KEYS.VIEW,
-							INFRA_MONITORING_K8S_PARAMS_KEYS.TRACES_FILTERS,
-							INFRA_MONITORING_K8S_PARAMS_KEYS.EVENTS_FILTERS,
-							INFRA_MONITORING_K8S_PARAMS_KEYS.LOG_FILTERS,
-						].includes(key),
-				),
-			),
-		});
 	};
 
 	const handleGroupByChange = useCallback(
 		(value: IBuilderQuery['groupBy']) => {
-			const groupBy = [];
+			const newGroupBy = [];
 
 			for (let index = 0; index < value.length; index++) {
 				const element = (value[index] as unknown) as string;
@@ -600,17 +576,13 @@ function K8sClustersList({
 				);
 
 				if (key) {
-					groupBy.push(key);
+					newGroupBy.push(key);
 				}
 			}
 
 			// Reset pagination on switching to groupBy
 			setCurrentPage(1);
-			setGroupBy(groupBy);
-			setSearchParams({
-				...Object.fromEntries(searchParams.entries()),
-				[INFRA_MONITORING_K8S_PARAMS_KEYS.GROUP_BY]: JSON.stringify(groupBy),
-			});
+			setGroupBy(newGroupBy);
 			setExpandedRowKeys([]);
 			logEvent(InfraMonitoringEvents.GroupByChanged, {
 				entity: InfraMonitoringEvents.K8sEntity,
@@ -618,7 +590,7 @@ function K8sClustersList({
 				category: InfraMonitoringEvents.Cluster,
 			});
 		},
-		[groupByFiltersData, searchParams, setSearchParams],
+		[groupByFiltersData, setCurrentPage, setGroupBy],
 	);
 
 	useEffect(() => {
@@ -697,8 +669,10 @@ function K8sClustersList({
 				}}
 				tableLayout="fixed"
 				onChange={handleTableChange}
-				onRow={(record): { onClick: () => void; className: string } => ({
-					onClick: (): void => handleRowClick(record),
+				onRow={(
+					record,
+				): { onClick: (event: React.MouseEvent) => void; className: string } => ({
+					onClick: (event: React.MouseEvent): void => handleRowClick(record, event),
 					className: 'clickable-row',
 				})}
 				expandable={{

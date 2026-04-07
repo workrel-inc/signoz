@@ -1,7 +1,6 @@
-/* eslint-disable sonarjs/no-duplicate-string */
+import { ReactNode } from 'react';
 import { Color } from '@signozhq/design-tokens';
-import { Progress, Tag, Tooltip } from 'antd';
-import { ColumnType } from 'antd/es/table';
+import { Progress, TableColumnType as ColumnType, Tag, Tooltip } from 'antd';
 import { convertFiltersToExpressionWithExistingQuery } from 'components/QueryBuilderV2/utils';
 import {
 	FiltersType,
@@ -14,11 +13,9 @@ import { getWidgetQueryBuilder } from 'container/MetricsApplication/MetricsAppli
 import { convertNanoToMilliseconds } from 'container/MetricsExplorer/Summary/utils';
 import dayjs from 'dayjs';
 import { GetQueryResultsProps } from 'lib/dashboard/getQueryResults';
-import { RowData } from 'lib/query/createTableColumnsFromQuery';
 import { cloneDeep } from 'lodash-es';
 import { ArrowUpDown, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { getWidgetQuery } from 'pages/MessagingQueues/MQDetails/MetricPage/MetricPageUtil';
-import { ReactNode } from 'react';
 import { Widgets } from 'types/api/dashboard/getAll';
 import { MetricRangePayloadProps } from 'types/api/metrics/getQueryRange';
 import {
@@ -37,7 +34,7 @@ import {
 } from 'types/api/v5/queryRange';
 import { QueryData } from 'types/api/widgets/getQuery';
 import { EQueryType } from 'types/common/dashboard';
-import { DataSource } from 'types/common/queryBuilder';
+import { DataSource, ReduceOperators } from 'types/common/queryBuilder';
 import { v4 } from 'uuid';
 
 import { domainNameKey } from './constants';
@@ -57,12 +54,12 @@ export const getDisplayValue = (value: unknown): string =>
 	isEmptyFilterValue(value) ? '-' : String(value);
 
 export const getDomainNameFilterExpression = (domainName: string): string =>
-	`(net.peer.name = '${domainName}' OR server.address = '${domainName}')`;
+	`http_host = '${domainName}'`;
 
 export const clientKindExpression = `kind_string = 'Client'`;
 
 /**
- * Converts filters to expression, handling http.url specially by creating (http.url OR url.full) condition
+ * Converts filters to expression
  * @param filters Filters to convert
  * @param baseExpression Base expression to combine with filters
  * @returns Filter expression string
@@ -73,34 +70,6 @@ export const convertFiltersWithUrlHandling = (
 ): string => {
 	if (!filters) {
 		return baseExpression;
-	}
-
-	// Check if filters contain http.url (SPAN_ATTRIBUTES.URL_PATH)
-	const httpUrlFilter = filters.items?.find(
-		(item) => item.key?.key === SPAN_ATTRIBUTES.URL_PATH,
-	);
-
-	// If http.url filter exists, create modified filters with (http.url OR url.full)
-	if (httpUrlFilter && httpUrlFilter.value) {
-		// Remove ALL http.url filters from items (guards against duplicates)
-		const otherFilters = filters.items?.filter(
-			(item) => item.key?.key !== SPAN_ATTRIBUTES.URL_PATH,
-		);
-
-		// Convert to expression first with other filters
-		const {
-			filter: intermediateFilter,
-		} = convertFiltersToExpressionWithExistingQuery(
-			{ ...filters, items: otherFilters || [] },
-			baseExpression,
-		);
-
-		// Add the OR condition for http.url and url.full
-		const urlValue = httpUrlFilter.value;
-		const urlCondition = `(http.url = '${urlValue}' OR url.full = '${urlValue}')`;
-		return intermediateFilter.expression.trim()
-			? `${intermediateFilter.expression} AND ${urlCondition}`
-			: urlCondition;
 	}
 
 	const { filter } = convertFiltersToExpressionWithExistingQuery(
@@ -208,9 +177,15 @@ export const columnsConfig: ColumnType<APIDomainsRowData>[] = [
 					: rowB.endpointCount;
 
 			// Handle cases where one or both values are empty
-			if (!endpointA && !endpointB) return 0;
-			if (!endpointA) return 1;
-			if (!endpointB) return -1;
+			if (!endpointA && !endpointB) {
+				return 0;
+			}
+			if (!endpointA) {
+				return 1;
+			}
+			if (!endpointB) {
+				return -1;
+			}
 
 			return Number(endpointA) - Number(endpointB);
 		},
@@ -288,8 +263,12 @@ export const columnsConfig: ColumnType<APIDomainsRowData>[] = [
 					size="small"
 					strokeColor={((): string => {
 						const errorRatePercent = Number((errorRateValue as number).toFixed(2));
-						if (errorRatePercent >= 90) return Color.BG_SAKURA_500;
-						if (errorRatePercent >= 60) return Color.BG_AMBER_500;
+						if (errorRatePercent >= 90) {
+							return Color.BG_SAKURA_500;
+						}
+						if (errorRatePercent >= 60) {
+							return Color.BG_AMBER_500;
+						}
 						return Color.BG_FOREST_500;
 					})()}
 					className="progress-bar error-rate"
@@ -361,7 +340,7 @@ export const formatDataForTable = (
 	});
 };
 
-const urlExpression = `(url.full EXISTS OR http.url EXISTS)`;
+const urlExpression = `${SPAN_ATTRIBUTES.HTTP_URL} EXISTS`;
 
 export const getDomainMetricsQueryPayload = (
 	domainName: string,
@@ -401,7 +380,7 @@ export const getDomainMetricsQueryPayload = (
 						orderBy: [],
 						groupBy: [],
 						legend: '',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 					{
 						dataSource: DataSource.TRACES,
@@ -429,7 +408,7 @@ export const getDomainMetricsQueryPayload = (
 						orderBy: [],
 						groupBy: [],
 						legend: '',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 					{
 						dataSource: DataSource.TRACES,
@@ -457,7 +436,7 @@ export const getDomainMetricsQueryPayload = (
 						orderBy: [],
 						groupBy: [],
 						legend: '',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 					{
 						dataSource: DataSource.TRACES,
@@ -485,7 +464,7 @@ export const getDomainMetricsQueryPayload = (
 						orderBy: [],
 						groupBy: [],
 						legend: '',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 				],
 				queryFormulas: [
@@ -578,14 +557,7 @@ const defaultGroupBy = [
 		dataType: DataTypes.String,
 		isColumn: false,
 		isJSON: false,
-		key: SPAN_ATTRIBUTES.URL_PATH,
-		type: 'attribute',
-	},
-	{
-		dataType: DataTypes.String,
-		isColumn: false,
-		isJSON: false,
-		key: 'url.full',
+		key: SPAN_ATTRIBUTES.HTTP_URL,
 		type: 'attribute',
 	},
 	// {
@@ -628,7 +600,7 @@ export const getEndPointsQueryPayload = (
 										key: {
 											dataType: DataTypes.String,
 											key: SPAN_ATTRIBUTES.SERVER_NAME,
-											type: 'tag',
+											type: '',
 										},
 										op: '=',
 										value: domainName,
@@ -653,7 +625,7 @@ export const getEndPointsQueryPayload = (
 							limit: 1000,
 							orderBy: [],
 							queryName: 'A',
-							reduceTo: 'avg',
+							reduceTo: ReduceOperators.AVG,
 							spaceAggregation: 'sum',
 							stepInterval: 60,
 							timeAggregation: 'count',
@@ -675,7 +647,7 @@ export const getEndPointsQueryPayload = (
 										key: {
 											dataType: DataTypes.String,
 											key: SPAN_ATTRIBUTES.SERVER_NAME,
-											type: 'tag',
+											type: '',
 										},
 										op: '=',
 										value: domainName,
@@ -700,7 +672,7 @@ export const getEndPointsQueryPayload = (
 							limit: 1000,
 							orderBy: [],
 							queryName: 'B',
-							reduceTo: 'avg',
+							reduceTo: ReduceOperators.AVG,
 							spaceAggregation: 'sum',
 							stepInterval: 60,
 							timeAggregation: 'p99',
@@ -723,7 +695,7 @@ export const getEndPointsQueryPayload = (
 										key: {
 											dataType: DataTypes.String,
 											key: SPAN_ATTRIBUTES.SERVER_NAME,
-											type: 'tag',
+											type: '',
 										},
 										op: '=',
 										value: domainName,
@@ -748,7 +720,7 @@ export const getEndPointsQueryPayload = (
 							limit: 1000,
 							orderBy: [],
 							queryName: 'C',
-							reduceTo: 'avg',
+							reduceTo: ReduceOperators.AVG,
 							spaceAggregation: 'sum',
 							stepInterval: 60,
 							timeAggregation: 'max',
@@ -770,7 +742,7 @@ export const getEndPointsQueryPayload = (
 										key: {
 											dataType: DataTypes.String,
 											key: SPAN_ATTRIBUTES.SERVER_NAME,
-											type: 'tag',
+											type: '',
 										},
 										op: '=',
 										value: domainName,
@@ -805,7 +777,7 @@ export const getEndPointsQueryPayload = (
 							limit: 1000,
 							orderBy: [],
 							queryName: 'D',
-							reduceTo: 'avg',
+							reduceTo: ReduceOperators.AVG,
 							spaceAggregation: 'sum',
 							stepInterval: 60,
 							timeAggregation: 'count',
@@ -849,7 +821,6 @@ export const getEndPointsQueryPayload = (
 	];
 };
 
-// eslint-disable-next-line sonarjs/cognitive-complexity
 function buildFilterExpression(
 	domainName: string,
 	filters: IBuilderQuery['filters'],
@@ -857,8 +828,8 @@ function buildFilterExpression(
 ): string {
 	const baseFilterParts = [
 		`kind_string = 'Client'`,
-		`(http.url EXISTS OR url.full EXISTS)`,
-		`(net.peer.name = '${domainName}' OR server.address = '${domainName}')`,
+		`${SPAN_ATTRIBUTES.HTTP_URL} EXISTS`,
+		`${SPAN_ATTRIBUTES.SERVER_NAME} = '${domainName}'`,
 		`has_error = true`,
 	];
 	if (showStatusCodeErrors) {
@@ -900,12 +871,7 @@ export const getTopErrorsQueryPayload = (
 						filter: { expression: filterExpression },
 						groupBy: [
 							{
-								name: 'http.url',
-								fieldDataType: 'string',
-								fieldContext: 'attribute',
-							},
-							{
-								name: 'url.full',
+								name: SPAN_ATTRIBUTES.HTTP_URL,
 								fieldDataType: 'string',
 								fieldContext: 'attribute',
 							},
@@ -992,7 +958,9 @@ export const getEndPointsColumnsConfig = (
 			return (
 				<div className="endpoint-name-value">
 					{((): React.ReactNode => {
-						if (!isGroupedByAttribute) return null;
+						if (!isGroupedByAttribute) {
+							return null;
+						}
 						return expandedRowKeys.includes(record.key) ? (
 							<ChevronDown size={14} />
 						) : (
@@ -1049,10 +1017,7 @@ export const getEndPointsColumnsConfig = (
 		sorter: true,
 		align: 'right',
 		className: `column`,
-		render: (
-			errorRate: number | string,
-			// eslint-disable-next-line sonarjs/no-identical-functions
-		): React.ReactNode => (
+		render: (errorRate: number | string): React.ReactNode => (
 			<Progress
 				status="active"
 				percent={Number(
@@ -1062,11 +1027,14 @@ export const getEndPointsColumnsConfig = (
 				)}
 				strokeLinecap="butt"
 				size="small"
-				strokeColor={((): // eslint-disable-next-line sonarjs/no-identical-functions
-				string => {
+				strokeColor={((): string => {
 					const errorRatePercent = Number((errorRate as number).toFixed(1));
-					if (errorRatePercent >= 90) return Color.BG_SAKURA_500;
-					if (errorRatePercent >= 60) return Color.BG_AMBER_500;
+					if (errorRatePercent >= 90) {
+						return Color.BG_SAKURA_500;
+					}
+					if (errorRatePercent >= 60) {
+						return Color.BG_AMBER_500;
+					}
 					return Color.BG_FOREST_500;
 				})()}
 				className="progress-bar error-rate"
@@ -1108,7 +1076,9 @@ export const formatEndPointsDataForTable = (
 	orderBy?: OrderByPayload | null,
 	// eslint-disable-next-line sonarjs/cognitive-complexity
 ): EndPointsTableRowData[] => {
-	if (!data) return [];
+	if (!data) {
+		return [];
+	}
 	const isGroupedByAttribute = groupBy.length > 0;
 
 	let formattedData: EndPointsTableRowData[] = [];
@@ -1116,11 +1086,11 @@ export const formatEndPointsDataForTable = (
 	if (!isGroupedByAttribute) {
 		formattedData = data?.map((endpoint) => {
 			const { port } = extractPortAndEndpoint(
-				(endpoint.data[SPAN_ATTRIBUTES.URL_PATH] as string) || '',
+				(endpoint.data[SPAN_ATTRIBUTES.HTTP_URL] as string) || '',
 			);
 			return {
 				key: v4(),
-				endpointName: (endpoint.data[SPAN_ATTRIBUTES.URL_PATH] as string) || '-',
+				endpointName: (endpoint.data[SPAN_ATTRIBUTES.HTTP_URL] as string) || '-',
 				port,
 				callCount:
 					endpoint.data.A === 'n/a' || endpoint.data.A === undefined
@@ -1229,7 +1199,9 @@ export interface TopErrorsTableRowData {
 export const formatTopErrorsDataForTable = (
 	scalarResult: TopErrorsResponseRow | undefined,
 ): TopErrorsTableRowData[] => {
-	if (!scalarResult?.data) return [];
+	if (!scalarResult?.data) {
+		return [];
+	}
 
 	const columns = scalarResult.columns || [];
 	const rows = scalarResult.data || [];
@@ -1242,9 +1214,7 @@ export const formatTopErrorsDataForTable = (
 
 		return {
 			key: v4(),
-			endpointName: getDisplayValue(
-				rowObj[SPAN_ATTRIBUTES.URL_PATH] || rowObj['url.full'],
-			),
+			endpointName: getDisplayValue(rowObj[SPAN_ATTRIBUTES.HTTP_URL]),
 			statusCode: getDisplayValue(rowObj[SPAN_ATTRIBUTES.RESPONSE_STATUS_CODE]),
 			statusMessage: getDisplayValue(rowObj.status_message),
 			count: getDisplayValue(rowObj.__result_0),
@@ -1261,10 +1231,10 @@ export const getTopErrorsCoRelationQueryFilters = (
 		{
 			id: 'ea16470b',
 			key: {
-				key: 'http.url',
+				key: SPAN_ATTRIBUTES.HTTP_URL,
 				dataType: DataTypes.String,
 				type: 'tag',
-				id: 'http.url--string--tag--false',
+				id: `${SPAN_ATTRIBUTES.HTTP_URL}--string--tag--false`,
 			},
 			op: '=',
 			value: endPointName,
@@ -1282,7 +1252,7 @@ export const getTopErrorsCoRelationQueryFilters = (
 		{
 			id: 'e8a043b7',
 			key: {
-				key: 'net.peer.name',
+				key: SPAN_ATTRIBUTES.SERVER_NAME,
 				dataType: DataTypes.String,
 				type: '',
 			},
@@ -1368,7 +1338,9 @@ export const createFiltersForSelectedRowData = (
 		op: 'and',
 	};
 
-	if (!selectedRowData) return baseFilters;
+	if (!selectedRowData) {
+		return baseFilters;
+	}
 
 	const { groupedByMeta = {} } = selectedRowData;
 
@@ -1431,7 +1403,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'A',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'rate',
@@ -1461,7 +1433,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'B',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'p99',
@@ -1491,7 +1463,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'C',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'count',
@@ -1521,7 +1493,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'D',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'max',
@@ -1551,7 +1523,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'E',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'count',
@@ -1629,7 +1601,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'A',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'count',
@@ -1665,7 +1637,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'B',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'p99',
@@ -1705,7 +1677,7 @@ export const getEndPointDetailsQueryPayload = (
 							},
 						],
 						legend: 'rate',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 				],
 				queryFormulas: [],
@@ -1759,7 +1731,7 @@ export const getEndPointDetailsQueryPayload = (
 								filters || { items: [], op: 'AND' },
 								`${getDomainNameFilterExpression(
 									domainName,
-								)} AND ${clientKindExpression} AND (http.url EXISTS OR url.full EXISTS)`,
+								)} AND ${clientKindExpression} AND ${SPAN_ATTRIBUTES.HTTP_URL} EXISTS`,
 							),
 						},
 						expression: 'A',
@@ -1771,17 +1743,12 @@ export const getEndPointDetailsQueryPayload = (
 						orderBy: [],
 						groupBy: [
 							{
-								key: SPAN_ATTRIBUTES.URL_PATH,
-								dataType: DataTypes.String,
-								type: 'attribute',
-							},
-							{
-								key: 'url.full',
+								key: SPAN_ATTRIBUTES.HTTP_URL,
 								dataType: DataTypes.String,
 								type: 'attribute',
 							},
 						],
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 				],
 				queryFormulas: [],
@@ -1850,7 +1817,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'A',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'count',
@@ -1887,7 +1854,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'B',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'p99',
@@ -1924,7 +1891,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'C',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'rate',
@@ -1961,7 +1928,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'D',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: 60,
 						timeAggregation: 'count',
@@ -2039,7 +2006,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'A',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: null,
 						timeAggregation: 'rate',
@@ -2110,7 +2077,7 @@ export const getEndPointDetailsQueryPayload = (
 						limit: null,
 						orderBy: [],
 						queryName: 'A',
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 						spaceAggregation: 'sum',
 						stepInterval: null,
 						timeAggregation: 'p99',
@@ -2176,7 +2143,7 @@ export const getEndPointZeroStateQueryPayload = (
 									key: {
 										key: SPAN_ATTRIBUTES.SERVER_NAME,
 										dataType: DataTypes.String,
-										type: 'tag',
+										type: '',
 									},
 									op: '=',
 									value: domainName,
@@ -2203,12 +2170,12 @@ export const getEndPointZeroStateQueryPayload = (
 						orderBy: [],
 						groupBy: [
 							{
-								key: SPAN_ATTRIBUTES.URL_PATH,
+								key: SPAN_ATTRIBUTES.HTTP_URL,
 								dataType: DataTypes.String,
 								type: 'tag',
 							},
 						],
-						reduceTo: 'avg',
+						reduceTo: ReduceOperators.AVG,
 					},
 				],
 				queryFormulas: [],
@@ -2313,7 +2280,9 @@ export const getFormattedEndPointMetricsData = (
 export const getFormattedEndPointStatusCodeData = (
 	data: EndPointStatusCodeResponseRow[],
 ): EndPointStatusCodeData[] => {
-	if (!data) return [];
+	if (!data) {
+		return [];
+	}
 	return data.map((row) => ({
 		key: v4(),
 		statusCode: getDisplayValue(row.data.response_status_code),
@@ -2395,8 +2364,7 @@ export const statusCodeWidgetInfo = [
 
 interface EndPointDropDownResponseRow {
 	data: {
-		[SPAN_ATTRIBUTES.URL_PATH]: string;
-		'url.full': string;
+		[SPAN_ATTRIBUTES.HTTP_URL]: string;
 		A: number;
 	};
 }
@@ -2410,11 +2378,13 @@ interface EndPointDropDownData {
 export const getFormattedEndPointDropDownData = (
 	data: EndPointDropDownResponseRow[],
 ): EndPointDropDownData[] => {
-	if (!data) return [];
+	if (!data) {
+		return [];
+	}
 	return data.map((row) => ({
 		key: v4(),
-		label: row.data[SPAN_ATTRIBUTES.URL_PATH] || row.data['url.full'] || '-',
-		value: row.data[SPAN_ATTRIBUTES.URL_PATH] || row.data['url.full'] || '-',
+		label: row.data[SPAN_ATTRIBUTES.HTTP_URL] || '-',
+		value: row.data[SPAN_ATTRIBUTES.HTTP_URL] || '-',
 	}));
 };
 
@@ -2445,9 +2415,10 @@ export interface DependentServicesData {
 // Discuss once about type safety of this function
 export const getFormattedDependentServicesData = (
 	data: DependentServicesResponseRow[],
-	// eslint-disable-next-line sonarjs/cognitive-complexity
 ): DependentServicesData[] => {
-	if (!data) return [];
+	if (!data) {
+		return [];
+	}
 	const totalCount = data?.reduce((acc, row) => acc + Number(row.data.A), 0);
 	return data?.map((row) => ({
 		key: v4(),
@@ -2533,23 +2504,23 @@ export const dependentServicesColumns: ColumnType<DependentServicesData>[] = [
 		dataIndex: 'errorPercentage',
 		key: 'errorPercentage',
 		align: 'center',
-		render: (
-			errorPercentage: number | string,
-			// eslint-disable-next-line sonarjs/no-identical-functions
-		): React.ReactNode =>
+		render: (errorPercentage: number | string): React.ReactNode =>
 			errorPercentage !== '-' ? (
 				<Progress
 					status="active"
 					percent={Number((errorPercentage as number).toFixed(2))}
 					strokeLinecap="butt"
 					size="small"
-					strokeColor={((): // eslint-disable-next-line sonarjs/no-identical-functions
-					string => {
+					strokeColor={((): string => {
 						const errorPercentagePercent = Number(
 							(errorPercentage as number).toFixed(2),
 						);
-						if (errorPercentagePercent >= 90) return Color.BG_SAKURA_500;
-						if (errorPercentagePercent >= 60) return Color.BG_AMBER_500;
+						if (errorPercentagePercent >= 90) {
+							return Color.BG_SAKURA_500;
+						}
+						if (errorPercentagePercent >= 60) {
+							return Color.BG_AMBER_500;
+						}
 						return Color.BG_FOREST_500;
 					})()}
 					className="progress-bar error-rate"
@@ -2651,7 +2622,9 @@ export const groupStatusCodes = (
 	// First pass: collect all series and timestamps
 	result.forEach((series) => {
 		const statusCode = series.metric?.response_status_code;
-		if (!statusCode) return;
+		if (!statusCode) {
+			return;
+		}
 
 		const statusClass = getStatusCodeClass(statusCode);
 
@@ -2691,7 +2664,9 @@ export const groupStatusCodes = (
 	// Second pass: aggregate values by status class and timestamp
 	result.forEach((series) => {
 		const statusCode = series.metric?.response_status_code;
-		if (!statusCode) return;
+		if (!statusCode) {
+			return;
+		}
 
 		const statusClass = getStatusCodeClass(statusCode);
 
@@ -2733,7 +2708,6 @@ export const groupStatusCodes = (
 
 export const getStatusCodeBarChartWidgetData = (
 	domainName: string,
-	endPointName: string,
 	filters: IBuilderQuery['filters'],
 ): Widgets => ({
 	query: {
@@ -2757,25 +2731,11 @@ export const getStatusCodeBarChartWidgetData = (
 								key: {
 									dataType: DataTypes.String,
 									key: SPAN_ATTRIBUTES.SERVER_NAME,
-									type: 'tag',
+									type: '',
 								},
 								op: '=',
 								value: domainName,
 							},
-							...(endPointName
-								? [
-										{
-											id: '8b1be6f0',
-											key: {
-												dataType: DataTypes.String,
-												key: SPAN_ATTRIBUTES.URL_PATH,
-												type: 'tag',
-											},
-											op: '=',
-											value: endPointName,
-										},
-								  ]
-								: []),
 							...(filters?.items || []),
 						],
 						op: 'AND',
@@ -2787,7 +2747,7 @@ export const getStatusCodeBarChartWidgetData = (
 					limit: null,
 					orderBy: [],
 					queryName: 'A',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: 60,
 					timeAggregation: 'rate',
@@ -2897,7 +2857,7 @@ export const getAllEndpointsWidgetData = (
 							filters,
 							`${getDomainNameFilterExpression(
 								domainName,
-							)} AND ${clientKindExpression} AND (http.url EXISTS OR url.full EXISTS)`,
+							)} AND ${clientKindExpression} AND http_url EXISTS`,
 						),
 					},
 					functions: [],
@@ -2909,7 +2869,7 @@ export const getAllEndpointsWidgetData = (
 					limit: 1000,
 					orderBy: [],
 					queryName: 'A',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: 60,
 					timeAggregation: 'count',
@@ -2929,7 +2889,7 @@ export const getAllEndpointsWidgetData = (
 							filters,
 							`${getDomainNameFilterExpression(
 								domainName,
-							)} AND ${clientKindExpression} AND (http.url EXISTS OR url.full EXISTS)`,
+							)} AND ${clientKindExpression} AND http_url EXISTS`,
 						),
 					},
 					functions: [],
@@ -2941,7 +2901,7 @@ export const getAllEndpointsWidgetData = (
 					limit: 1000,
 					orderBy: [],
 					queryName: 'B',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: 60,
 					timeAggregation: 'p99',
@@ -2961,7 +2921,7 @@ export const getAllEndpointsWidgetData = (
 							filters,
 							`${getDomainNameFilterExpression(
 								domainName,
-							)} AND ${clientKindExpression} AND (http.url EXISTS OR url.full EXISTS)`,
+							)} AND ${clientKindExpression} AND http_url EXISTS`,
 						),
 					},
 					functions: [],
@@ -2973,7 +2933,7 @@ export const getAllEndpointsWidgetData = (
 					limit: 1000,
 					orderBy: [],
 					queryName: 'C',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: 60,
 					timeAggregation: 'max',
@@ -2993,7 +2953,7 @@ export const getAllEndpointsWidgetData = (
 							filters,
 							`${getDomainNameFilterExpression(
 								domainName,
-							)} AND ${clientKindExpression} AND has_error = true AND (http.url EXISTS OR url.full EXISTS)`,
+							)} AND ${clientKindExpression} AND has_error = true AND http_url EXISTS`,
 						),
 					},
 					functions: [],
@@ -3005,7 +2965,7 @@ export const getAllEndpointsWidgetData = (
 					limit: 1000,
 					orderBy: [],
 					queryName: 'D',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: 60,
 					timeAggregation: 'count',
@@ -3024,24 +2984,12 @@ export const getAllEndpointsWidgetData = (
 	);
 
 	widget.renderColumnCell = {
-		[SPAN_ATTRIBUTES.URL_PATH]: (
-			url: string | number,
-			record?: RowData,
-		): ReactNode => {
-			// First try to use the url from the column value
-			let urlValue = url;
-
-			// If url is empty/null and we have the record, fallback to url.full
-			if (isEmptyFilterValue(url) && record) {
-				const { 'url.full': urlFull } = record;
-				urlValue = urlFull;
-			}
-
-			if (!urlValue || urlValue === 'n/a') {
+		[SPAN_ATTRIBUTES.HTTP_URL]: (url: string | number): ReactNode => {
+			if (isEmptyFilterValue(url) || !url || url === 'n/a') {
 				return <span>-</span>;
 			}
 
-			const { endpoint } = extractPortAndEndpoint(String(urlValue));
+			const { endpoint } = extractPortAndEndpoint(String(url));
 			return <span>{getDisplayValue(endpoint)}</span>;
 		},
 		A: (numOfCalls: any): ReactNode => (
@@ -3075,15 +3023,18 @@ export const getAllEndpointsWidgetData = (
 				)}
 				strokeLinecap="butt"
 				size="small"
-				strokeColor={((): // eslint-disable-next-line sonarjs/no-identical-functions
-				string => {
+				strokeColor={((): string => {
 					const errorRatePercent = Number(
 						((errorRate === 'n/a' || errorRate === '-'
 							? 0
 							: errorRate) as number).toFixed(2),
 					);
-					if (errorRatePercent >= 90) return Color.BG_SAKURA_500;
-					if (errorRatePercent >= 60) return Color.BG_AMBER_500;
+					if (errorRatePercent >= 90) {
+						return Color.BG_SAKURA_500;
+					}
+					if (errorRatePercent >= 60) {
+						return Color.BG_AMBER_500;
+					}
 					return Color.BG_FOREST_500;
 				})()}
 				className="progress-bar error-rate"
@@ -3092,8 +3043,8 @@ export const getAllEndpointsWidgetData = (
 	};
 
 	widget.customColTitles = {
-		[SPAN_ATTRIBUTES.URL_PATH]: 'Endpoint',
-		'net.peer.port': 'Port',
+		[SPAN_ATTRIBUTES.HTTP_URL]: 'Endpoint',
+		[SPAN_ATTRIBUTES.SERVER_PORT]: 'Port',
 	};
 
 	widget.title = (
@@ -3118,12 +3069,10 @@ export const getAllEndpointsWidgetData = (
 		</div>
 	);
 
-	widget.hiddenColumns = ['url.full'];
-
 	return widget;
 };
 
-const keysToRemove = ['http.url', 'url.full', 'B', 'C', 'F1'];
+const keysToRemove = [SPAN_ATTRIBUTES.HTTP_URL, 'A', 'B', 'C', 'F1'];
 
 export const getGroupByFiltersFromGroupByValues = (
 	rowData: any,
@@ -3159,7 +3108,6 @@ export const getRateOverTimeWidgetData = (
 	let legend = domainName;
 	if (endPointName) {
 		const { endpoint } = extractPortAndEndpoint(endPointName);
-		// eslint-disable-next-line sonarjs/no-nested-template-literals
 		legend = `${endpoint}`;
 	}
 
@@ -3181,7 +3129,7 @@ export const getRateOverTimeWidgetData = (
 					filter: {
 						expression: convertFiltersWithUrlHandling(
 							filters || { items: [], op: 'AND' },
-							`(net.peer.name = '${domainName}' OR server.address = '${domainName}')`,
+							`http_host = '${domainName}'`,
 						),
 					},
 					functions: [],
@@ -3191,7 +3139,7 @@ export const getRateOverTimeWidgetData = (
 					limit: null,
 					orderBy: [],
 					queryName: 'A',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: null,
 					timeAggregation: 'rate',
@@ -3210,7 +3158,6 @@ export const getLatencyOverTimeWidgetData = (
 	let legend = domainName;
 	if (endPointName) {
 		const { endpoint } = extractPortAndEndpoint(endPointName);
-		// eslint-disable-next-line sonarjs/no-nested-template-literals
 		legend = `${endpoint}`;
 	}
 
@@ -3232,7 +3179,7 @@ export const getLatencyOverTimeWidgetData = (
 					filter: {
 						expression: convertFiltersWithUrlHandling(
 							filters || { items: [], op: 'AND' },
-							`(net.peer.name = '${domainName}' OR server.address = '${domainName}')`,
+							`http_host = '${domainName}'`,
 						),
 					},
 					functions: [],
@@ -3242,7 +3189,7 @@ export const getLatencyOverTimeWidgetData = (
 					limit: null,
 					orderBy: [],
 					queryName: 'A',
-					reduceTo: 'avg',
+					reduceTo: ReduceOperators.AVG,
 					spaceAggregation: 'sum',
 					stepInterval: null,
 					timeAggregation: 'p99',

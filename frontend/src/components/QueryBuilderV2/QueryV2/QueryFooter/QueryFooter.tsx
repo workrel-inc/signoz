@@ -1,13 +1,12 @@
-import './QueryFooter.styles.scss';
-
-/* eslint-disable react/require-default-props */
+import { useMemo } from 'react';
 import { Button, Tooltip, Typography } from 'antd';
 import WarningPopover from 'components/WarningPopover/WarningPopover';
 import { PANEL_TYPES } from 'constants/queryBuilder';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { DraftingCompass, Plus, Sigma } from 'lucide-react';
 import BetaTag from 'periscope/components/BetaTag/BetaTag';
-import { useMemo } from 'react';
+
+import './QueryFooter.styles.scss';
 
 function TraceOperatorSection({
 	addTraceOperator,
@@ -31,7 +30,9 @@ function TraceOperatorSection({
 	]);
 
 	const traceOperatorWarning = useMemo(() => {
-		if (currentQuery.builder.queryData.length === 0) return '';
+		if (currentQuery.builder.queryData.length === 0) {
+			return '';
+		}
 		const firstQuery = currentQuery.builder.queryData[0];
 		return `Currently, you are only seeing results from query ${firstQuery.queryName}. Add a trace operator to combine results of multiple queries.`;
 	}, [currentQuery]);

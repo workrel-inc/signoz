@@ -1,7 +1,5 @@
-/* eslint-disable jsx-a11y/no-static-element-interactions */
-/* eslint-disable jsx-a11y/click-events-have-key-events */
-import './DataSource.styles.scss';
-
+import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { LoadingOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, Select, Space, Typography } from 'antd';
 import logEvent from 'api/common/logEvent';
@@ -20,12 +18,13 @@ import {
 	messagingQueueKakfaSupportedDataSources,
 } from 'container/OnboardingContainer/utils/dataSourceUtils';
 import { useNotifications } from 'hooks/useNotifications';
+import { useSafeNavigate } from 'hooks/useSafeNavigate';
 import useUrlQuery from 'hooks/useUrlQuery';
 import { Blocks, Check } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useHistory } from 'react-router-dom';
+import { isModifierKeyPressed } from 'utils/app';
 import { popupContainer } from 'utils/selectPopupContainer';
+
+import './DataSource.styles.scss';
 
 export interface DataSourceType {
 	id?: string;
@@ -37,7 +36,7 @@ export interface DataSourceType {
 export default function DataSource(): JSX.Element {
 	const [form] = Form.useForm();
 	const { t } = useTranslation(['common']);
-	const history = useHistory();
+	const { safeNavigate } = useSafeNavigate();
 
 	const getStartedSource = useUrlQuery().get(QueryParams.getStartedSource);
 
@@ -141,13 +140,13 @@ export default function DataSource(): JSX.Element {
 		}
 	};
 
-	const goToIntegrationsPage = (): void => {
+	const goToIntegrationsPage = (e?: React.MouseEvent): void => {
 		logEvent('Onboarding V2: Go to integrations', {
 			module: selectedModule?.id,
 			dataSource: selectedDataSource?.name,
 			framework: selectedFramework,
 		});
-		history.push(ROUTES.INTEGRATIONS);
+		safeNavigate(ROUTES.INTEGRATIONS, { newTab: !!e && isModifierKeyPressed(e) });
 	};
 
 	return (
@@ -249,7 +248,7 @@ export default function DataSource(): JSX.Element {
 								page which allows more sources of sending data
 							</Typography.Text>
 							<Button
-								onClick={goToIntegrationsPage}
+								onClick={(e): void => goToIntegrationsPage(e)}
 								icon={<Blocks size={14} />}
 								className="navigate-integrations-page-btn"
 							>

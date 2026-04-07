@@ -1,3 +1,8 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from 'react-query';
+// eslint-disable-next-line no-restricted-imports
+import { useDispatch, useSelector } from 'react-redux';
+import { useLocation, useParams } from 'react-router-dom';
 import logEvent from 'api/common/logEvent';
 import getTopLevelOperations, {
 	ServiceDataProps,
@@ -21,16 +26,14 @@ import history from 'lib/history';
 import { OnClickPluginOpts } from 'lib/uPlotLib/plugins/onClickPlugin';
 import { defaultTo } from 'lodash-es';
 import { useAppContext } from 'providers/App/App';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from 'react-query';
-import { useDispatch, useSelector } from 'react-redux';
-import { useLocation, useParams } from 'react-router-dom';
 import { UpdateTimeInterval } from 'store/actions';
 import { AppState } from 'store/reducers';
 import { DataTypes } from 'types/api/queryBuilder/queryAutocompleteResponse';
 import { Query } from 'types/api/queryBuilder/queryBuilderData';
 import { EQueryType } from 'types/common/dashboard';
 import { GlobalReducer } from 'types/reducer/globalTime';
+import { isModifierKeyPressed } from 'utils/app';
+import { openInNewTab } from 'utils/navigation';
 import { secondsToMilliseconds } from 'utils/timeUtils';
 import { v4 as uuid } from 'uuid';
 
@@ -235,7 +238,7 @@ function Application(): JSX.Element {
 			timestamp: number,
 			apmToTraceQuery: Query,
 			isViewLogsClicked?: boolean,
-		): (() => void) => (): void => {
+		): ((e: React.MouseEvent) => void) => (e: React.MouseEvent): void => {
 			const endTime = secondsToMilliseconds(timestamp);
 			const startTime = secondsToMilliseconds(timestamp - stepInterval);
 
@@ -259,7 +262,11 @@ function Application(): JSX.Element {
 				queryString,
 			);
 
-			history.push(newPath);
+			if (isModifierKeyPressed(e)) {
+				openInNewTab(newPath);
+			} else {
+				history.push(newPath);
+			}
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[stepInterval],

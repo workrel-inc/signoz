@@ -4,31 +4,35 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/SigNoz/signoz/pkg/modules/role"
+	"github.com/SigNoz/signoz/pkg/authz"
 	"github.com/SigNoz/signoz/pkg/statsreporter"
 	"github.com/SigNoz/signoz/pkg/types"
 	"github.com/SigNoz/signoz/pkg/types/authtypes"
 	"github.com/SigNoz/signoz/pkg/types/dashboardtypes"
+	"github.com/SigNoz/signoz/pkg/types/querybuildertypes/querybuildertypesv5"
 	"github.com/SigNoz/signoz/pkg/valuer"
 )
 
 type Module interface {
-	// enables public sharing for dashboard.
+	// creates public sharing config and enables public sharing for the dashboard
 	CreatePublic(context.Context, valuer.UUID, *dashboardtypes.PublicDashboard) error
 
-	// gets the config for public sharing by org_id and dashboard_id.
+	// gets the public sharing config for the dashboard
 	GetPublic(context.Context, valuer.UUID, valuer.UUID) (*dashboardtypes.PublicDashboard, error)
 
 	// get the dashboard data by public dashboard id
 	GetDashboardByPublicID(context.Context, valuer.UUID) (*dashboardtypes.Dashboard, error)
 
-	// gets the org for the given public dashboard
-	GetPublicDashboardOrgAndSelectors(ctx context.Context, id valuer.UUID, orgs []*types.Organization) ([]authtypes.Selector, valuer.UUID, error)
+	// gets the query results by widget index and public shared id for a dashboard
+	GetPublicWidgetQueryRange(context.Context, valuer.UUID, uint64, uint64, uint64) (*querybuildertypesv5.QueryRangeResponse, error)
 
-	// updates the config for public sharing.
-	UpdatePublic(context.Context, *dashboardtypes.PublicDashboard) error
+	// gets the selectors and org for the given public dashboard
+	GetPublicDashboardSelectorsAndOrg(context.Context, valuer.UUID, []*types.Organization) ([]authtypes.Selector, valuer.UUID, error)
 
-	// disables the public sharing for the dashboard.
+	// updates the public sharing config for a dashboard
+	UpdatePublic(context.Context, valuer.UUID, *dashboardtypes.PublicDashboard) error
+
+	// deletes the public sharing config and disables public sharing for the dashboard
 	DeletePublic(context.Context, valuer.UUID, valuer.UUID) error
 
 	Create(ctx context.Context, orgID valuer.UUID, createdBy string, creator valuer.UUID, data dashboardtypes.PostableDashboard) (*dashboardtypes.Dashboard, error)
@@ -39,7 +43,7 @@ type Module interface {
 
 	Update(ctx context.Context, orgID valuer.UUID, id valuer.UUID, updatedBy string, data dashboardtypes.UpdatableDashboard, diff int) (*dashboardtypes.Dashboard, error)
 
-	LockUnlock(ctx context.Context, orgID valuer.UUID, id valuer.UUID, updatedBy string, role types.Role, lock bool) error
+	LockUnlock(ctx context.Context, orgID valuer.UUID, id valuer.UUID, updatedBy string, isAdmin bool, lock bool) error
 
 	Delete(ctx context.Context, orgID valuer.UUID, id valuer.UUID) error
 
@@ -47,7 +51,7 @@ type Module interface {
 
 	statsreporter.StatsCollector
 
-	role.RegisterTypeable
+	authz.RegisterTypeable
 }
 
 type Handler interface {

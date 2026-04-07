@@ -122,7 +122,7 @@ var (
 		"attribute_string_peer$$service_exists":        {Name: "attribute_string_peer$$service_exists", Type: schema.ColumnTypeBool},
 	}
 
-	// TODO(srikanthccv): remove this mapping
+	// TODO(srikanthccv): remove this mapping.
 	oldToNew = map[string]string{
 		// deprecated intrinsic -> new intrinsic
 		"traceID":          "trace_id",
@@ -169,62 +169,78 @@ func NewFieldMapper() *defaultFieldMapper {
 
 func (m *defaultFieldMapper) getColumn(
 	_ context.Context,
+	_, _ uint64,
 	key *telemetrytypes.TelemetryFieldKey,
-) (*schema.Column, error) {
+) ([]*schema.Column, error) {
 	switch key.FieldContext {
 	case telemetrytypes.FieldContextResource:
-		return indexV3Columns["resource"], nil
+		return []*schema.Column{indexV3Columns["resource"]}, nil
 	case telemetrytypes.FieldContextScope:
-		return nil, qbtypes.ErrColumnNotFound
+		return []*schema.Column{}, qbtypes.ErrColumnNotFound
 	case telemetrytypes.FieldContextAttribute:
 		switch key.FieldDataType {
 		case telemetrytypes.FieldDataTypeString:
-			return indexV3Columns["attributes_string"], nil
+			return []*schema.Column{indexV3Columns["attributes_string"]}, nil
 		case telemetrytypes.FieldDataTypeInt64,
 			telemetrytypes.FieldDataTypeFloat64,
 			telemetrytypes.FieldDataTypeNumber:
-			return indexV3Columns["attributes_number"], nil
+			return []*schema.Column{indexV3Columns["attributes_number"]}, nil
 		case telemetrytypes.FieldDataTypeBool:
-			return indexV3Columns["attributes_bool"], nil
+			return []*schema.Column{indexV3Columns["attributes_bool"]}, nil
 		}
 	case telemetrytypes.FieldContextSpan, telemetrytypes.FieldContextUnspecified:
+		/*
+			TODO: This is incorrect, we cannot assume all unspecified context fields are span context.
+			User could be referring to attributes, but we cannot fix this until we fix where_clause vistior
+			https://github.com/SigNoz/signoz/pull/10102
+		*/
 		// Check if this is a span scope field
 		if strings.ToLower(key.Name) == SpanSearchScopeRoot || strings.ToLower(key.Name) == SpanSearchScopeEntryPoint {
 			// The actual SQL will be generated in the condition builder
-			return &schema.Column{Name: key.Name, Type: schema.ColumnTypeBool}, nil
+			return []*schema.Column{{Name: key.Name, Type: schema.ColumnTypeBool}}, nil
 		}
 
 		// TODO(srikanthccv): remove this when it's safe to remove
 		// issue with CH aliasing
+
+		/*
+			NOTE: There are fields which are deprecated for only to not show up as user suggestion and is possible that
+			they don't have a mapping in oldToNew map. So we need to look up in indexV3Columns directly for those fields.
+			For example: kind, timestamp etc.
+		*/
 		if _, ok := CalculatedFieldsDeprecated[key.Name]; ok {
-			return indexV3Columns[oldToNew[key.Name]], nil
+			// Check if we have a mapping for the deprecated calculated field
+			if col, ok := indexV3Columns[oldToNew[key.Name]]; ok {
+				return []*schema.Column{col}, nil
+			}
 		}
 		if _, ok := IntrinsicFieldsDeprecated[key.Name]; ok {
 			// Check if we have a mapping for the deprecated intrinsic field
-			if _, ok := indexV3Columns[oldToNew[key.Name]]; ok {
-				return indexV3Columns[oldToNew[key.Name]], nil
+			if col, ok := indexV3Columns[oldToNew[key.Name]]; ok {
+				return []*schema.Column{col}, nil
 			}
 		}
 
 		if col, ok := indexV3Columns[key.Name]; ok {
-			return col, nil
+			return []*schema.Column{col}, nil
 		}
-		return nil, qbtypes.ErrColumnNotFound
 	}
 	return nil, qbtypes.ErrColumnNotFound
 }
 
 func (m *defaultFieldMapper) ColumnFor(
 	ctx context.Context,
+	startNs, endNs uint64,
 	key *telemetrytypes.TelemetryFieldKey,
-) (*schema.Column, error) {
-	return m.getColumn(ctx, key)
+) ([]*schema.Column, error) {
+	return m.getColumn(ctx, startNs, endNs, key)
 }
 
 // FieldFor returns the table field name for the given key if it exists
-// otherwise it returns qbtypes.ErrColumnNotFound
+// otherwise it returns qbtypes.ErrColumnNotFound.
 func (m *defaultFieldMapper) FieldFor(
 	ctx context.Context,
+	startNs, endNs uint64,
 	key *telemetrytypes.TelemetryFieldKey,
 ) (string, error) {
 	// Special handling for span scope fields
@@ -234,13 +250,17 @@ func (m *defaultFieldMapper) FieldFor(
 		return key.Name, nil
 	}
 
-	column, err := m.getColumn(ctx, key)
+	columns, err := m.getColumn(ctx, startNs, endNs, key)
 	if err != nil {
 		return "", err
 	}
+	if len(columns) != 1 {
+		return "", errors.Newf(errors.TypeInternal, errors.CodeInternal, "expected exactly 1 column, got %d", len(columns))
+	}
+	column := columns[0]
 
-	switch column.Type {
-	case schema.JSONColumnType{}:
+	switch column.Type.GetType() {
+	case schema.ColumnTypeEnumJSON:
 		// json is only supported for resource context as of now
 		if key.FieldContext != telemetrytypes.FieldContextResource {
 			return "", errors.Newf(errors.TypeInvalidInput, errors.CodeInvalidInput, "only resource context fields are supported for json columns, got %s", key.FieldContext.String)
@@ -256,58 +276,53 @@ func (m *defaultFieldMapper) FieldFor(
 		} else {
 			return fmt.Sprintf("multiIf(%s.`%s` IS NOT NULL, %s.`%s`::String, mapContains(%s, '%s'), %s, NULL)", column.Name, key.Name, column.Name, key.Name, oldColumn.Name, key.Name, oldKeyName), nil
 		}
-
-	case schema.ColumnTypeString,
-		schema.LowCardinalityColumnType{ElementType: schema.ColumnTypeString},
-		schema.ColumnTypeUInt64,
-		schema.ColumnTypeUInt32,
-		schema.ColumnTypeInt8,
-		schema.ColumnTypeInt16,
-		schema.ColumnTypeBool,
-		schema.DateTime64ColumnType{Precision: 9, Timezone: "UTC"},
-		schema.FixedStringColumnType{Length: 32}:
+	case schema.ColumnTypeEnumString,
+		schema.ColumnTypeEnumUInt64,
+		schema.ColumnTypeEnumUInt32,
+		schema.ColumnTypeEnumInt8,
+		schema.ColumnTypeEnumInt16,
+		schema.ColumnTypeEnumBool,
+		schema.ColumnTypeEnumDateTime64,
+		schema.ColumnTypeEnumFixedString:
 		return column.Name, nil
-	case schema.MapColumnType{
-		KeyType:   schema.LowCardinalityColumnType{ElementType: schema.ColumnTypeString},
-		ValueType: schema.ColumnTypeString,
-	}:
-		// a key could have been materialized, if so return the materialized column name
-		if key.Materialized {
-			return telemetrytypes.FieldKeyToMaterializedColumnName(key), nil
+	case schema.ColumnTypeEnumLowCardinality:
+		switch elementType := column.Type.(schema.LowCardinalityColumnType).ElementType; elementType.GetType() {
+		case schema.ColumnTypeEnumString:
+			return column.Name, nil
+		default:
+			return "", errors.NewInvalidInputf(errors.CodeInvalidInput, "value type %s is not supported for low cardinality column type %s", elementType, column.Type)
 		}
-		return fmt.Sprintf("%s['%s']", column.Name, key.Name), nil
-	case schema.MapColumnType{
-		KeyType:   schema.LowCardinalityColumnType{ElementType: schema.ColumnTypeString},
-		ValueType: schema.ColumnTypeFloat64,
-	}:
-		// a key could have been materialized, if so return the materialized column name
-		if key.Materialized {
-			return telemetrytypes.FieldKeyToMaterializedColumnName(key), nil
+	case schema.ColumnTypeEnumMap:
+		keyType := column.Type.(schema.MapColumnType).KeyType
+		if _, ok := keyType.(schema.LowCardinalityColumnType); !ok {
+			return "", errors.NewInvalidInputf(errors.CodeInvalidInput, "key type %s is not supported for map column type %s", keyType, column.Type)
 		}
-		return fmt.Sprintf("%s['%s']", column.Name, key.Name), nil
-	case schema.MapColumnType{
-		KeyType:   schema.LowCardinalityColumnType{ElementType: schema.ColumnTypeString},
-		ValueType: schema.ColumnTypeBool,
-	}:
-		// a key could have been materialized, if so return the materialized column name
-		if key.Materialized {
-			return telemetrytypes.FieldKeyToMaterializedColumnName(key), nil
+
+		switch valueType := column.Type.(schema.MapColumnType).ValueType; valueType.GetType() {
+		case schema.ColumnTypeEnumString, schema.ColumnTypeEnumFloat64, schema.ColumnTypeEnumBool:
+			// a key could have been materialized, if so return the materialized column name
+			if key.Materialized {
+				return telemetrytypes.FieldKeyToMaterializedColumnName(key), nil
+			}
+			return fmt.Sprintf("%s['%s']", column.Name, key.Name), nil
+		default:
+			return "", errors.NewInvalidInputf(errors.CodeInvalidInput, "value type %s is not supported for map column type %s", valueType, column.Type)
 		}
-		return fmt.Sprintf("%s['%s']", column.Name, key.Name), nil
 	}
 	// should not reach here
 	return column.Name, nil
 }
 
 // ColumnExpressionFor returns the column expression for the given field
-// if it exists otherwise it returns qbtypes.ErrColumnNotFound
+// if it exists otherwise it returns qbtypes.ErrColumnNotFound.
 func (m *defaultFieldMapper) ColumnExpressionFor(
 	ctx context.Context,
+	startNs, endNs uint64,
 	field *telemetrytypes.TelemetryFieldKey,
 	keys map[string][]*telemetrytypes.TelemetryFieldKey,
 ) (string, error) {
 
-	colName, err := m.FieldFor(ctx, field)
+	fieldExpression, err := m.FieldFor(ctx, startNs, endNs, field)
 	if errors.Is(err, qbtypes.ErrColumnNotFound) {
 		// the key didn't have the right context to be added to the query
 		// we try to use the context we know of
@@ -317,7 +332,7 @@ func (m *defaultFieldMapper) ColumnExpressionFor(
 			if _, ok := indexV3Columns[field.Name]; ok {
 				// if it is, attach the column name directly
 				field.FieldContext = telemetrytypes.FieldContextSpan
-				colName, _ = m.FieldFor(ctx, field)
+				fieldExpression, _ = m.FieldFor(ctx, startNs, endNs, field)
 			} else {
 				// - the context is not provided
 				// - there are not keys for the field
@@ -335,17 +350,17 @@ func (m *defaultFieldMapper) ColumnExpressionFor(
 			}
 		} else if len(keysForField) == 1 {
 			// we have a single key for the field, use it
-			colName, _ = m.FieldFor(ctx, keysForField[0])
+			fieldExpression, _ = m.FieldFor(ctx, startNs, endNs, keysForField[0])
 		} else {
 			// select any non-empty value from the keys
 			args := []string{}
 			for _, key := range keysForField {
-				colName, _ = m.FieldFor(ctx, key)
-				args = append(args, fmt.Sprintf("toString(%s) != '', toString(%s)", colName, colName))
+				fieldExpression, _ = m.FieldFor(ctx, startNs, endNs, key)
+				args = append(args, fmt.Sprintf("toString(%s) != '', toString(%s)", fieldExpression, fieldExpression))
 			}
-			colName = fmt.Sprintf("multiIf(%s, NULL)", strings.Join(args, ", "))
+			fieldExpression = fmt.Sprintf("multiIf(%s, NULL)", strings.Join(args, ", "))
 		}
 	}
 
-	return fmt.Sprintf("%s AS `%s`", sqlbuilder.Escape(colName), field.Name), nil
+	return fmt.Sprintf("%s AS `%s`", sqlbuilder.Escape(fieldExpression), field.Name), nil
 }

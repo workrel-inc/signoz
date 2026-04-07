@@ -2,16 +2,13 @@ package api
 
 import (
 	"net/http"
-	"net/http/httputil"
 	"time"
 
 	"github.com/SigNoz/signoz/ee/licensing/httplicensing"
-	"github.com/SigNoz/signoz/ee/query-service/integrations/gateway"
 	"github.com/SigNoz/signoz/ee/query-service/usage"
 	"github.com/SigNoz/signoz/pkg/alertmanager"
-	"github.com/SigNoz/signoz/pkg/apis/fields"
+	"github.com/SigNoz/signoz/pkg/global"
 	"github.com/SigNoz/signoz/pkg/http/middleware"
-	querierAPI "github.com/SigNoz/signoz/pkg/querier"
 	baseapp "github.com/SigNoz/signoz/pkg/query-service/app"
 	"github.com/SigNoz/signoz/pkg/query-service/app/cloudintegrations"
 	"github.com/SigNoz/signoz/pkg/query-service/app/integrations"
@@ -21,10 +18,6 @@ import (
 	rules "github.com/SigNoz/signoz/pkg/query-service/rules"
 	"github.com/SigNoz/signoz/pkg/queryparser"
 	"github.com/SigNoz/signoz/pkg/signoz"
-	"github.com/SigNoz/signoz/pkg/types"
-	"github.com/SigNoz/signoz/pkg/types/authtypes"
-	"github.com/SigNoz/signoz/pkg/types/dashboardtypes"
-	"github.com/SigNoz/signoz/pkg/valuer"
 	"github.com/SigNoz/signoz/pkg/version"
 	"github.com/gorilla/mux"
 )
@@ -36,10 +29,10 @@ type APIHandlerOptions struct {
 	IntegrationsController        *integrations.Controller
 	CloudIntegrationsController   *cloudintegrations.Controller
 	LogsParsingPipelineController *logparsingpipeline.LogParsingPipelineController
-	Gateway                       *httputil.ReverseProxy
 	GatewayUrl                    string
 	// Querier Influx Interval
 	FluxInterval time.Duration
+	GlobalConfig global.Config
 }
 
 type APIHandler struct {
@@ -48,7 +41,7 @@ type APIHandler struct {
 }
 
 // NewAPIHandler returns an APIHandler
-func NewAPIHandler(opts APIHandlerOptions, signoz *signoz.SigNoz) (*APIHandler, error) {
+func NewAPIHandler(opts APIHandlerOptions, signoz *signoz.SigNoz, config signoz.Config) (*APIHandler, error) {
 	baseHandler, err := baseapp.NewAPIHandler(baseapp.APIHandlerOpts{
 		Reader:                        opts.DataConnector,
 		RuleManager:                   opts.RulesManager,
@@ -58,11 +51,9 @@ func NewAPIHandler(opts APIHandlerOptions, signoz *signoz.SigNoz) (*APIHandler, 
 		FluxInterval:                  opts.FluxInterval,
 		AlertmanagerAPI:               alertmanager.NewAPI(signoz.Alertmanager),
 		LicensingAPI:                  httplicensing.NewLicensingAPI(signoz.Licensing),
-		FieldsAPI:                     fields.NewAPI(signoz.Instrumentation.ToProviderSettings(), signoz.TelemetryStore),
 		Signoz:                        signoz,
-		QuerierAPI:                    querierAPI.NewAPI(signoz.Instrumentation.ToProviderSettings(), signoz.Querier, signoz.Analytics),
 		QueryParserAPI:                queryparser.NewAPI(signoz.Instrumentation.ToProviderSettings(), signoz.QueryParser),
-	})
+	}, config)
 
 	if err != nil {
 		return nil, err
@@ -83,20 +74,12 @@ func (ah *APIHandler) UM() *usage.Manager {
 	return ah.opts.UsageManager
 }
 
-func (ah *APIHandler) Gateway() *httputil.ReverseProxy {
-	return ah.opts.Gateway
-}
-
 // RegisterRoutes registers routes for this handler on the given router
 func (ah *APIHandler) RegisterRoutes(router *mux.Router, am *middleware.AuthZ) {
 	// note: add ee override methods first
 
 	// routes available only in ee version
 	router.HandleFunc("/api/v1/features", am.ViewAccess(ah.getFeatureFlags)).Methods(http.MethodGet)
-
-	// paid plans specific routes
-	router.HandleFunc("/api/v1/complete/saml", am.OpenAccess(ah.Signoz.Handlers.Session.CreateSessionBySAMLCallback)).Methods(http.MethodPost)
-	router.HandleFunc("/api/v1/complete/oidc", am.OpenAccess(ah.Signoz.Handlers.Session.CreateSessionByOIDCCallback)).Methods(http.MethodGet)
 
 	// base overrides
 	router.HandleFunc("/api/v1/version", am.OpenAccess(ah.getVersion)).Methods(http.MethodGet)
@@ -105,39 +88,6 @@ func (ah *APIHandler) RegisterRoutes(router *mux.Router, am *middleware.AuthZ) {
 	router.HandleFunc("/api/v1/billing", am.AdminAccess(ah.getBilling)).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/portal", am.AdminAccess(ah.LicensingAPI.Portal)).Methods(http.MethodPost)
 
-	// dashboards
-	router.HandleFunc("/api/v1/dashboards/{id}/public", am.AdminAccess(ah.Signoz.Handlers.Dashboard.CreatePublic)).Methods(http.MethodPost)
-	router.HandleFunc("/api/v1/dashboards/{id}/public", am.AdminAccess(ah.Signoz.Handlers.Dashboard.GetPublic)).Methods(http.MethodGet)
-	router.HandleFunc("/api/v1/dashboards/{id}/public", am.AdminAccess(ah.Signoz.Handlers.Dashboard.UpdatePublic)).Methods(http.MethodPut)
-	router.HandleFunc("/api/v1/dashboards/{id}/public", am.AdminAccess(ah.Signoz.Handlers.Dashboard.DeletePublic)).Methods(http.MethodDelete)
-
-	// public access for dashboards
-	router.HandleFunc("/api/v1/public/dashboards/{id}", am.CheckWithoutClaims(
-		ah.Signoz.Handlers.Dashboard.GetPublicData,
-		authtypes.RelationRead, authtypes.RelationRead,
-		dashboardtypes.TypeableMetaResourcePublicDashboard,
-		func(req *http.Request, orgs []*types.Organization) ([]authtypes.Selector, valuer.UUID, error) {
-			id, err := valuer.NewUUID(mux.Vars(req)["id"])
-			if err != nil {
-				return nil, valuer.UUID{}, err
-			}
-
-			return ah.Signoz.Modules.Dashboard.GetPublicDashboardOrgAndSelectors(req.Context(), id, orgs)
-		})).Methods(http.MethodGet)
-
-	router.HandleFunc("/api/v1/public/dashboards/{id}/widgets/{index}/query_range", am.CheckWithoutClaims(
-		ah.Signoz.Handlers.Dashboard.GetPublicWidgetQueryRange,
-		authtypes.RelationRead, authtypes.RelationRead,
-		dashboardtypes.TypeableMetaResourcePublicDashboard,
-		func(req *http.Request, orgs []*types.Organization) ([]authtypes.Selector, valuer.UUID, error) {
-			id, err := valuer.NewUUID(mux.Vars(req)["id"])
-			if err != nil {
-				return nil, valuer.UUID{}, err
-			}
-
-			return ah.Signoz.Modules.Dashboard.GetPublicDashboardOrgAndSelectors(req.Context(), id, orgs)
-		})).Methods(http.MethodGet)
-
 	// v3
 	router.HandleFunc("/api/v3/licenses", am.AdminAccess(ah.LicensingAPI.Activate)).Methods(http.MethodPost)
 	router.HandleFunc("/api/v3/licenses", am.AdminAccess(ah.LicensingAPI.Refresh)).Methods(http.MethodPut)
@@ -145,14 +95,6 @@ func (ah *APIHandler) RegisterRoutes(router *mux.Router, am *middleware.AuthZ) {
 
 	// v4
 	router.HandleFunc("/api/v4/query_range", am.ViewAccess(ah.queryRangeV4)).Methods(http.MethodPost)
-
-	// v5
-	router.HandleFunc("/api/v5/query_range", am.ViewAccess(ah.queryRangeV5)).Methods(http.MethodPost)
-
-	router.HandleFunc("/api/v5/substitute_vars", am.ViewAccess(ah.QuerierAPI.ReplaceVariables)).Methods(http.MethodPost)
-
-	// Gateway
-	router.PathPrefix(gateway.RoutePrefix).HandlerFunc(am.EditAccess(ah.ServeGatewayHTTP))
 
 	ah.APIHandler.RegisterRoutes(router, am)
 

@@ -1,5 +1,6 @@
 /* eslint-disable sonarjs/cognitive-complexity */
-import { getMetricsListFilterValues } from 'api/metricsExplorer/getMetricsListFilterValues';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebounce } from 'react-use';
 import { getAttributesValues } from 'api/queryBuilder/getAttributesValues';
 import { DATA_TYPE_VS_ATTRIBUTE_VALUES_KEY } from 'constants/queryBuilder';
 import { DEBOUNCE_DELAY } from 'constants/queryBuilderFilterConfig';
@@ -12,11 +13,8 @@ import {
 	getTagToken,
 	isInNInOperator,
 } from 'container/QueryBuilder/filters/QueryBuilderSearch/utils';
-import { useGetMetricsListFilterKeys } from 'hooks/metricsExplorer/useGetMetricsListFilterKeys';
 import useDebounceValue from 'hooks/useDebounce';
 import { cloneDeep, isEqual, uniqWith, unset } from 'lodash-es';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useDebounce } from 'react-use';
 import { IAttributeValuesResponse } from 'types/api/queryBuilder/getAttributesValues';
 import {
 	BaseAutocompleteData,
@@ -152,21 +150,8 @@ export const useFetchKeysAndValues = (
 		},
 	);
 
-	const {
-		data: metricsListFilterKeysData,
-		isFetching: isFetchingMetricsListFilterKeys,
-		status: fetchingMetricsListFilterKeysStatus,
-	} = useGetMetricsListFilterKeys(
-		{
-			searchText: searchKey,
-		},
-		{
-			enabled: isMetricsExplorer && isQueryEnabled && !shouldUseSuggestions,
-			queryKey: [searchKey],
-		},
-	);
-
 	function isAttributeValuesResponse(
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		payload: any,
 	): payload is IAttributeValuesResponse {
 		return (
@@ -180,14 +165,6 @@ export const useFetchKeysAndValues = (
 		);
 	}
 
-	function isMetricsListFilterValuesData(
-		payload: any,
-	): payload is { filterValues: string[] } {
-		return (
-			payload && 'filterValues' in payload && Array.isArray(payload.filterValues)
-		);
-	}
-
 	/**
 	 * Fetches the options to be displayed based on the selected value
 	 * @param value - the selected value
@@ -197,7 +174,6 @@ export const useFetchKeysAndValues = (
 		value: string,
 		query: IBuilderQuery,
 		keys: BaseAutocompleteData[],
-		// eslint-disable-next-line sonarjs/cognitive-complexity
 	): Promise<void> => {
 		if (!value) {
 			return;
@@ -232,15 +208,6 @@ export const useFetchKeysAndValues = (
 						: tagValue?.toString() ?? '',
 				});
 				payload = response.payload;
-			} else if (isMetricsExplorer) {
-				const response = await getMetricsListFilterValues({
-					searchText: searchKey,
-					filterKey: filterAttributeKey?.key ?? tagKey,
-					filterAttributeKeyDataType:
-						filterAttributeKey?.dataType ?? DataTypes.EMPTY,
-					limit: 10,
-				});
-				payload = response.payload?.data;
 			} else {
 				const response = await getAttributesValues({
 					aggregateOperator: query.aggregateOperator || '',
@@ -257,18 +224,11 @@ export const useFetchKeysAndValues = (
 				payload = response.payload;
 			}
 
-			if (payload) {
-				if (isAttributeValuesResponse(payload)) {
-					const dataType = filterAttributeKey?.dataType ?? DataTypes.String;
-					const key = DATA_TYPE_VS_ATTRIBUTE_VALUES_KEY[dataType];
-					setResults(key ? payload[key] || [] : []);
-					return;
-				}
-
-				if (isMetricsExplorer && isMetricsListFilterValuesData(payload)) {
-					setResults(payload.filterValues || []);
-					return;
-				}
+			if (payload && isAttributeValuesResponse(payload)) {
+				const dataType = filterAttributeKey?.dataType ?? DataTypes.String;
+				const key = DATA_TYPE_VS_ATTRIBUTE_VALUES_KEY[dataType];
+				setResults(key ? payload[key] || [] : []);
+				return;
 			}
 		} catch (e) {
 			console.error(e);
@@ -305,32 +265,6 @@ export const useFetchKeysAndValues = (
 			setKeys([]);
 		}
 	}, [data?.payload?.attributeKeys, status]);
-
-	useEffect(() => {
-		if (
-			isMetricsExplorer &&
-			fetchingMetricsListFilterKeysStatus === 'success' &&
-			!isFetchingMetricsListFilterKeys &&
-			metricsListFilterKeysData?.payload?.data?.attributeKeys
-		) {
-			setKeys(metricsListFilterKeysData.payload.data.attributeKeys);
-			setSourceKeys((prevState) =>
-				uniqWith(
-					[
-						...(metricsListFilterKeysData.payload.data.attributeKeys ?? []),
-						...prevState,
-					],
-					isEqual,
-				),
-			);
-		}
-	}, [
-		metricsListFilterKeysData?.payload?.data?.attributeKeys,
-		fetchingMetricsListFilterKeysStatus,
-		isMetricsExplorer,
-		metricsListFilterKeysData,
-		isFetchingMetricsListFilterKeys,
-	]);
 
 	useEffect(() => {
 		if (

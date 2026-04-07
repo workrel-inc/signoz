@@ -19,12 +19,13 @@ import (
 
 func CollisionHandledFinalExpr(
 	ctx context.Context,
+	startNs uint64,
+	endNs uint64,
 	field *telemetrytypes.TelemetryFieldKey,
 	fm qbtypes.FieldMapper,
 	cb qbtypes.ConditionBuilder,
 	keys map[string][]*telemetrytypes.TelemetryFieldKey,
 	requiredDataType telemetrytypes.FieldDataType,
-	jsonBodyPrefix string,
 	jsonKeyToKey qbtypes.JsonKeyToFieldFunc,
 ) (string, []any, error) {
 
@@ -45,7 +46,7 @@ func CollisionHandledFinalExpr(
 
 	addCondition := func(key *telemetrytypes.TelemetryFieldKey) error {
 		sb := sqlbuilder.NewSelectBuilder()
-        condition, err := cb.ConditionFor(ctx, key, qbtypes.FilterOperatorExists, nil, sb, 0, 0)
+		condition, err := cb.ConditionFor(ctx, startNs, endNs, key, qbtypes.FilterOperatorExists, nil, sb)
 		if err != nil {
 			return err
 		}
@@ -58,8 +59,8 @@ func CollisionHandledFinalExpr(
 		return nil
 	}
 
-	colName, err := fm.FieldFor(ctx, field)
-	if errors.Is(err, qbtypes.ErrColumnNotFound) {
+	fieldExpression, fieldForErr := fm.FieldFor(ctx, startNs, endNs, field)
+	if errors.Is(fieldForErr, qbtypes.ErrColumnNotFound) {
 		// the key didn't have the right context to be added to the query
 		// we try to use the context we know of
 		keysForField := keys[field.Name]
@@ -82,10 +83,10 @@ func CollisionHandledFinalExpr(
 			correction, found := telemetrytypes.SuggestCorrection(field.Name, maps.Keys(keys))
 			if found {
 				// we found a close match, in the error message send the suggestion
-				return "", nil, errors.Wrap(err, errors.TypeInvalidInput, errors.CodeInvalidInput, correction)
+				return "", nil, errors.WithAdditionalf(fieldForErr, "%s", correction)
 			} else {
 				// not even a close match, return an error
-				return "", nil, errors.Wrapf(err, errors.TypeInvalidInput, errors.CodeInvalidInput, "field `%s` not found", field.Name)
+				return "", nil, errors.WithAdditionalf(fieldForErr, "field `%s` not found", field.Name)
 			}
 		} else {
 			for _, key := range keysForField {
@@ -93,9 +94,9 @@ func CollisionHandledFinalExpr(
 				if err != nil {
 					return "", nil, err
 				}
-				colName, _ = fm.FieldFor(ctx, key)
-				colName, _ = DataTypeCollisionHandledFieldName(key, dummyValue, colName, qbtypes.FilterOperatorUnknown)
-				stmts = append(stmts, colName)
+				fieldExpression, _ = fm.FieldFor(ctx, startNs, endNs, key)
+				fieldExpression, _ = DataTypeCollisionHandledFieldName(key, dummyValue, fieldExpression, qbtypes.FilterOperatorUnknown)
+				stmts = append(stmts, fieldExpression)
 			}
 		}
 	} else {
@@ -104,15 +105,16 @@ func CollisionHandledFinalExpr(
 			return "", nil, err
 		}
 
-		if strings.HasPrefix(field.Name, jsonBodyPrefix) && jsonBodyPrefix != "" && jsonKeyToKey != nil {
-			// TODO(nitya): enable group by on body column?
+		// first if condition covers the older tests and second if condition covers the array conditions
+		if !BodyJSONQueryEnabled && field.FieldContext == telemetrytypes.FieldContextBody && jsonKeyToKey != nil {
 			return "", nil, errors.NewInvalidInputf(errors.CodeInvalidInput, "Group by/Aggregation isn't available for the body column")
-			// colName, _ = jsonKeyToKey(context.Background(), field, qbtypes.FilterOperatorUnknown, dummyValue)
+		} else if strings.Contains(field.Name, telemetrytypes.ArraySep) || strings.Contains(field.Name, telemetrytypes.ArrayAnyIndex) {
+			return "", nil, errors.NewInvalidInputf(errors.CodeInvalidInput, "Group by/Aggregation isn't available for the Array Paths: %s", field.Name)
 		} else {
-			colName, _ = DataTypeCollisionHandledFieldName(field, dummyValue, colName, qbtypes.FilterOperatorUnknown)
+			fieldExpression, _ = DataTypeCollisionHandledFieldName(field, dummyValue, fieldExpression, qbtypes.FilterOperatorUnknown)
 		}
 
-		stmts = append(stmts, colName)
+		stmts = append(stmts, fieldExpression)
 	}
 
 	for idx := range stmts {
@@ -204,7 +206,7 @@ func DataTypeCollisionHandledFieldName(key *telemetrytypes.TelemetryFieldKey, va
 	// While we expect user not to send the mixed data types, it inevitably happens
 	// So we handle the data type collisions here
 	switch key.FieldDataType {
-	case telemetrytypes.FieldDataTypeString:
+	case telemetrytypes.FieldDataTypeString, telemetrytypes.FieldDataTypeArrayString:
 		switch v := value.(type) {
 		case float64:
 			// try to convert the string value to to number
@@ -212,15 +214,22 @@ func DataTypeCollisionHandledFieldName(key *telemetrytypes.TelemetryFieldKey, va
 		case []any:
 			if allFloats(v) {
 				tblFieldName = castFloat(tblFieldName)
-			} else if hasString(v) {
+			} else {
+				// Any mix that is not all-floats (e.g. [bool, float64], [bool], all-strings)
+				// must be stringified: passing a Go bool as UInt8 against a String column
+				// causes ClickHouse error 386 "no supertype for String and UInt8".
 				_, value = castString(tblFieldName), toStrings(v)
 			}
 		case bool:
 			// we don't have a toBoolOrNull in ClickHouse, so we need to convert the bool to a string
 			value = fmt.Sprintf("%t", v)
 		}
-
-	case telemetrytypes.FieldDataTypeFloat64, telemetrytypes.FieldDataTypeInt64, telemetrytypes.FieldDataTypeNumber:
+	case telemetrytypes.FieldDataTypeInt64,
+		telemetrytypes.FieldDataTypeArrayInt64,
+		telemetrytypes.FieldDataTypeNumber,
+		telemetrytypes.FieldDataTypeArrayNumber,
+		telemetrytypes.FieldDataTypeFloat64,
+		telemetrytypes.FieldDataTypeArrayFloat64:
 		switch v := value.(type) {
 		// why? ; CH returns an error for a simple check
 		// attributes_number['http.status_code'] = 200 but not for attributes_number['http.status_code'] >= 200
@@ -258,7 +267,8 @@ func DataTypeCollisionHandledFieldName(key *telemetrytypes.TelemetryFieldKey, va
 			}
 		}
 
-	case telemetrytypes.FieldDataTypeBool:
+	case telemetrytypes.FieldDataTypeBool,
+		telemetrytypes.FieldDataTypeArrayBool:
 		switch v := value.(type) {
 		case string:
 			tblFieldName = castString(tblFieldName)

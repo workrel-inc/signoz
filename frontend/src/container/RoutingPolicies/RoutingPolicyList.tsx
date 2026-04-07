@@ -1,6 +1,6 @@
+import { useMemo } from 'react';
 import { Button, Table, TableProps, Typography } from 'antd';
 import { RotateCw } from 'lucide-react';
-import { useMemo } from 'react';
 
 import RoutingPolicyListItem from './RoutingPolicyListItem';
 import { RoutingPolicy, RoutingPolicyListProps } from './types';
@@ -32,7 +32,6 @@ function RoutingPolicyList({
 	const showLoading = isRoutingPoliciesLoading || isRoutingPoliciesFetching;
 	const showError = !showLoading && isRoutingPoliciesError;
 
-	/* eslint-disable no-nested-ternary */
 	const localeEmptyState = useMemo(
 		() => (
 			<div className="no-routing-policies-message-container">

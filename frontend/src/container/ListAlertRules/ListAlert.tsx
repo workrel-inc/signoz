@@ -1,14 +1,8 @@
-/* eslint-disable react/display-name */
+import React, { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { UseQueryResult } from 'react-query';
 import { PlusOutlined } from '@ant-design/icons';
-import {
-	Button,
-	Dropdown,
-	Flex,
-	Input,
-	MenuProps,
-	Tag,
-	Typography,
-} from 'antd';
+import { Button, Flex, Input, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table/interface';
 import saveAlertApi from 'api/alerts/save';
 import logEvent from 'api/common/logEvent';
@@ -29,16 +23,14 @@ import useComponentPermission from 'hooks/useComponentPermission';
 import useDebouncedFn from 'hooks/useDebouncedFunction';
 import useInterval from 'hooks/useInterval';
 import { useNotifications } from 'hooks/useNotifications';
+import { useSafeNavigate } from 'hooks/useSafeNavigate';
 import useUrlQuery from 'hooks/useUrlQuery';
-import history from 'lib/history';
 import { mapQueryDataFromApi } from 'lib/newQueryBuilder/queryBuilderMappers/mapQueryDataFromApi';
 import { useAppContext } from 'providers/App/App';
-import { useCallback, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { UseQueryResult } from 'react-query';
 import { ErrorResponse, SuccessResponse } from 'types/api';
 import { AlertTypes } from 'types/api/alerts/alertTypes';
 import { GettableAlert } from 'types/api/alerts/get';
+import { isModifierKeyPressed } from 'utils/app';
 
 import DeleteAlert from './DeleteAlert';
 import { ColumnButton, SearchContainer } from './styles';
@@ -50,6 +42,7 @@ const { Search } = Input;
 
 function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 	const { t } = useTranslation('common');
+	const { safeNavigate } = useSafeNavigate();
 	const { user } = useAppContext();
 	const [addNewAlert, action] = useComponentPermission(
 		['add_new_alert', 'action'],
@@ -107,42 +100,24 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 		});
 	}, [notificationsApi, t]);
 
-	const onClickNewAlertV2Handler = useCallback(() => {
-		logEvent('Alert: New alert button clicked', {
-			number: allAlertRules?.length,
-			layout: 'new',
-		});
-		history.push(`${ROUTES.ALERTS_NEW}?showNewCreateAlertsPage=true`);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	const onClickNewClassicAlertHandler = useCallback(() => {
-		logEvent('Alert: New alert button clicked', {
-			number: allAlertRules?.length,
-			layout: 'classic',
-		});
-		history.push(ROUTES.ALERTS_NEW);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	const newAlertMenuItems: MenuProps['items'] = [
-		{
-			key: 'new',
-			label: (
-				<span>
-					Try the new experience <Tag color="blue">Beta</Tag>
-				</span>
-			),
-			onClick: onClickNewAlertV2Handler,
+	const onClickNewAlertHandler = useCallback(
+		(e: React.MouseEvent): void => {
+			logEvent('Alert: New alert button clicked', {
+				number: allAlertRules?.length,
+				layout: 'new',
+			});
+			safeNavigate(ROUTES.ALERT_TYPE_SELECTION, {
+				newTab: isModifierKeyPressed(e),
+			});
 		},
-		{
-			key: 'classic',
-			label: 'Continue with the classic experience',
-			onClick: onClickNewClassicAlertHandler,
-		},
-	];
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[],
+	);
 
-	const onEditHandler = (record: GettableAlert, openInNewTab: boolean): void => {
+	const onEditHandler = (
+		record: GettableAlert,
+		options?: { newTab?: boolean },
+	): void => {
 		const compositeQuery = sanitizeDefaultAlertQuery(
 			mapQueryDataFromApi(record.condition.compositeQuery),
 			record.alertType as AlertTypes,
@@ -158,11 +133,9 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 
 		setEditLoader(false);
 
-		if (openInNewTab) {
-			window.open(`${ROUTES.ALERT_OVERVIEW}?${params.toString()}`, '_blank');
-		} else {
-			history.push(`${ROUTES.ALERT_OVERVIEW}?${params.toString()}`);
-		}
+		safeNavigate(`${ROUTES.ALERT_OVERVIEW}?${params.toString()}`, {
+			newTab: options?.newTab,
+		});
 	};
 
 	const onCloneHandler = (
@@ -190,7 +163,7 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 					setTimeout(() => {
 						const clonedAlert = refetchData.payload[refetchData.payload.length - 1];
 						params.set(QueryParams.ruleId, String(clonedAlert.id));
-						history.push(`${ROUTES.EDIT_ALERTS}?${params.toString()}`);
+						safeNavigate(`${ROUTES.EDIT_ALERTS}?${params.toString()}`);
 					}, 2000);
 				}
 				if (status === 'error') {
@@ -299,7 +272,7 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 				const onClickHandler = (e: React.MouseEvent<HTMLElement>): void => {
 					e.stopPropagation();
 					e.preventDefault();
-					onEditHandler(record, e.metaKey || e.ctrlKey);
+					onEditHandler(record, { newTab: isModifierKeyPressed(e) });
 				};
 
 				return <Typography.Link onClick={onClickHandler}>{value}</Typography.Link>;
@@ -364,7 +337,9 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 							/>,
 							<ColumnButton
 								key="2"
-								onClick={(): void => onEditHandler(record, false)}
+								onClick={(e: React.MouseEvent): void =>
+									onEditHandler(record, { newTab: isModifierKeyPressed(e) })
+								}
 								type="link"
 								loading={editLoader}
 							>
@@ -372,7 +347,7 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 							</ColumnButton>,
 							<ColumnButton
 								key="3"
-								onClick={(): void => onEditHandler(record, true)}
+								onClick={(): void => onEditHandler(record, { newTab: true })}
 								type="link"
 								loading={editLoader}
 							>
@@ -412,11 +387,13 @@ function ListAlert({ allAlertRules, refetch }: ListAlertProps): JSX.Element {
 				/>
 				<Flex gap={12}>
 					{addNewAlert && (
-						<Dropdown menu={{ items: newAlertMenuItems }} trigger={['click']}>
-							<Button type="primary" icon={<PlusOutlined />}>
-								New Alert
-							</Button>
-						</Dropdown>
+						<Button
+							type="primary"
+							onClick={onClickNewAlertHandler}
+							icon={<PlusOutlined />}
+						>
+							New Alert
+						</Button>
 					)}
 					<TextToolTip
 						{...{

@@ -1,20 +1,23 @@
 package queryfilterextractor
 
 import (
+	"sort"
+
 	"github.com/SigNoz/signoz/pkg/errors"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 )
 
-// PromQLFilterExtractor extracts metric names and grouping keys from PromQL queries
+// PromQLFilterExtractor extracts metric names and grouping keys from PromQL queries.
 type PromQLFilterExtractor struct{}
 
-// NewPromQLFilterExtractor creates a new PromQL filter extractor
+// NewPromQLFilterExtractor creates a new PromQL filter extractor.
 func NewPromQLFilterExtractor() *PromQLFilterExtractor {
 	return &PromQLFilterExtractor{}
 }
 
-// Extract parses a PromQL query and extracts metric names and grouping keys
+// Extract parses a PromQL query and extracts metric names and grouping keys.
 func (e *PromQLFilterExtractor) Extract(query string) (*FilterResult, error) {
 	expr, err := parser.ParseExpr(query)
 	if err != nil {
@@ -45,10 +48,16 @@ func (e *PromQLFilterExtractor) Extract(query string) (*FilterResult, error) {
 		result.GroupByColumns = append(result.GroupByColumns, ColumnInfo{Name: groupKey, OriginExpr: groupKey, OriginField: groupKey})
 	}
 
+	// Sort the metric names and group by columns to return deterministic results which helps in tests as well
+	sort.Strings(result.MetricNames)
+	sort.Slice(result.GroupByColumns, func(i, j int) bool {
+		return result.GroupByColumns[i].Name < result.GroupByColumns[j].Name
+	})
+
 	return result, nil
 }
 
-// promQLVisitor implements the parser.Visitor interface
+// promQLVisitor implements the parser.Visitor interface.
 type promQLVisitor struct {
 	metricNames map[string]bool
 	groupBy     map[string]bool
@@ -77,7 +86,7 @@ func (v *promQLVisitor) visitVectorSelector(vs *parser.VectorSelector) {
 
 	// Check for __name__ label matcher
 	for _, matcher := range vs.LabelMatchers {
-		if matcher.Name == labels.MetricName {
+		if matcher.Name == model.MetricNameLabel {
 			switch matcher.Type {
 			case labels.MatchEqual:
 				v.metricNames[matcher.Value] = true

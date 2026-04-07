@@ -1,6 +1,6 @@
-import { useNotifications } from 'hooks/useNotifications';
-import { useDashboard } from 'providers/Dashboard/Dashboard';
 import { useCallback } from 'react';
+import { useNotifications } from 'hooks/useNotifications';
+import { useDashboardStore } from 'providers/Dashboard/store/useDashboardStore';
 import { Widgets } from 'types/api/dashboard/getAll';
 import { BaseAutocompleteData } from 'types/api/queryBuilder/queryAutocompleteResponse';
 import {
@@ -88,7 +88,9 @@ export const buildFilters = (
 			(q) => q.queryName === requestData.queryName,
 		);
 
-		if (!formulaQuery) return {};
+		if (!formulaQuery) {
+			return {};
+		}
 
 		const queryNames = extractQueryNamesFromExpression(formulaQuery.expression);
 		const filteredQueryData = query.builder.queryData.filter((q) =>
@@ -119,7 +121,7 @@ function useNavigateToExplorerPages(): (
 ) => Promise<{
 	[queryName: string]: { filters: TagFilterItem[]; dataSource?: string };
 }> {
-	const { selectedDashboard } = useDashboard();
+	const { selectedDashboard } = useDashboardStore();
 	const { notifications } = useNotifications();
 
 	return useCallback(
